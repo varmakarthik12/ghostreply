@@ -3,159 +3,167 @@ package summary
 import (
 	"context"
 	"fmt"
+	"log"
+	"strconv"
 	"time"
-	"github.com/google/uuid"
+
 	"github.com/varmakarthik12/ghostreply/internal/chat"
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/llm"
 )
 
 type Worker struct {
-	store     *db.Store
-	semaphore chan struct{} // max 3 concurrent
-	ticker    *time.Ticker
-	done      chan struct{}
+	Store    *db.Store
+	Engine   *chat.Engine
+	Interval time.Duration
+	stop     chan struct{}
 }
 
-func NewWorker(store *db.Store) *Worker {
-	return &Worker{
-		store:     store,
-		semaphore: make(chan struct{}, 3),
-		ticker:    time.NewTicker(60 * time.Second),
-		done:      make(chan struct{}),
+func NewWorker(store *db.Store, engine *chat.Engine, interval time.Duration) *Worker {
+	if interval <= 0 {
+		interval = 5 * time.Minute
 	}
+	return &Worker{Store: store, Engine: engine, Interval: interval, stop: make(chan struct{})}
 }
 
 func (w *Worker) Start() {
-	go w.run()
+	go w.loop()
 }
 
-func (w *Worker) Stop() {
-	w.ticker.Stop()
-	close(w.done)
-}
+func (w *Worker) Stop() { close(w.stop) }
 
-func (w *Worker) run() {
+func (w *Worker) loop() {
+	t := time.NewTicker(w.Interval)
+	defer t.Stop()
 	for {
 		select {
-		case <-w.ticker.C:
-			w.checkConversations()
-		case <-w.done:
+		case <-w.stop:
 			return
+		case <-t.C:
+			w.RunOnce(context.Background())
 		}
 	}
 }
 
-func (w *Worker) checkConversations() {
-	convs, _ := w.store.ListConversations("")
-	for _, c := range convs {
-		w.checkConversation(c.ID)
-	}
-}
-
-func (w *Worker) checkConversation(convID string) {
-	modelCfg := w.store.GetEffectiveModelConfig(convID, "")
-	ctxWindow := modelCfg.ContextWindowTokens
-	config := w.store.GetMergedConfig(convID)
-	msgThreshold := getInt(config, "summary_message_threshold", 50)
-
-	// Get latest summary
-	sm, _ := w.store.GetSummary(convID)
-	var sinceID string
-	if sm != nil {
-		sinceID = sm.CoversUpToMessageID
-	}
-
-	// Count messages since last summary
-	count, _ := w.store.CountMessagesSince(convID, sinceID)
-
-	// Estimate tokens of unsummarized messages
-	msgs, _ := w.store.GetMessages(convID, 200)
-	var tokenEst int
-	for _, m := range msgs {
-		if sinceID != "" && m.ID <= sinceID { continue }
-		tokenEst += len(m.Content) / 4
-	}
-
-	// Trigger if either threshold hit
-	if count < msgThreshold && tokenEst < ctxWindow*70/100 {
-		return
-	}
-
-	// Acquire semaphore
-	w.semaphore <- struct{}{}
-	defer func() { <-w.semaphore }()
-
-	// Perform summarization
-	w.summarize(convID, sinceID, sm, msgs, ctxWindow)
-}
-
-func (w *Worker) summarize(convID, sinceID string, priorSm *db.Summary, allMsgs []*db.Message, ctxWindow int) {
-	// Filter unsummarized messages
-	var unsummarized []*db.Message
-	for _, m := range allMsgs {
-		if sinceID == "" || m.ID > sinceID {
-			unsummarized = append(unsummarized, m)
-		}
-	}
-	if len(unsummarized) == 0 {
-		return
-	}
-
-	// Build prompt
-	system := "You are a conversation memory system. Maintain a single rolling summary."
-	var userPrompt string
-	if priorSm != nil {
-		userPrompt = fmt.Sprintf(`EXISTING SUMMARY (covers up to %s):
-%s
-
-NEW MESSAGES SINCE LAST SUMMARY:
-`, priorSm.CreatedAt, priorSm.SummaryText)
-	} else {
-		userPrompt = "Summarize this conversation:\n"
-	}
-	for _, m := range unsummarized {
-		userPrompt += fmt.Sprintf("%s: %s\n", m.SenderID, m.Content)
-	}
-	userPrompt += "\nUpdate the existing summary by incorporating the new messages. Produce ONE comprehensive summary paragraph covering the ENTIRE conversation. Focus on: relationship context, recurring topics, emotional tone, important facts, unresolved threads. Be concise but complete."
-
-	// Create provider
-	modelCfg := w.store.GetEffectiveModelConfig(convID, "")
-	provider, err := chat.NewProviderFromConfig(modelCfg)
+func (w *Worker) RunOnce(ctx context.Context) {
+	convs, err := w.Store.ListConversations("")
 	if err != nil {
-		fmt.Printf("Summarize error: %v\n", err)
 		return
 	}
+	msgThresh := atoi(w.Store.GetConfigValue("summary_threshold", "50"), 50)
+	tokThresh := atoi(w.Store.GetConfigValue("token_threshold", "4000"), 4000)
+	for _, c := range convs {
+		if err := w.SummarizeIfNeeded(ctx, c.ID, msgThresh, tokThresh); err != nil {
+			log.Printf("summary worker: %s: %v", c.ID, err)
+		}
+	}
+}
 
-	reply, err := provider.Chat(context.Background(), system, []llm.Turn{
-		{Role: "user", Content: userPrompt},
+// SummarizeIfNeeded returns nil if no summary needed.
+func (w *Worker) SummarizeIfNeeded(ctx context.Context, conversationID string, msgThresh, tokThresh int) error {
+	count, err := w.Store.CountMessages(conversationID)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	tokens := estimateTokensFor(w.Store, conversationID, count)
+	if count < msgThresh && tokens < tokThresh {
+		return nil
+	}
+	return w.Summarize(ctx, conversationID)
+}
+
+// Summarize forces an immediate summarization of a conversation.
+// It always chains all previous summaries to build a complete picture,
+// then deletes all summarized messages and all old summaries, leaving
+// exactly one up-to-date summary.
+func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
+	conv, err := w.Store.FindConversationByID(conversationID)
+	if err != nil {
+		return err
+	}
+	msgs, err := w.Store.RecentMessages(conversationID, 1000)
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	// Collect ALL previous summaries oldest-first to build a cumulative context.
+	prevSummaries, _ := w.Store.ListSummaries(conversationID)
+	// ListSummaries returns newest-first; reverse so oldest is first.
+	for i, j := 0, len(prevSummaries)-1; i < j; i, j = i+1, j-1 {
+		prevSummaries[i], prevSummaries[j] = prevSummaries[j], prevSummaries[i]
+	}
+	var prevContext string
+	for i, sm := range prevSummaries {
+		if i == 0 {
+			prevContext = sm.Text
+		} else {
+			prevContext += "\n\n" + sm.Text
+		}
+	}
+
+	var body string
+	for _, m := range msgs {
+		role := "user"
+		if m.IsOutbound == 1 {
+			role = "assistant"
+		}
+		body += fmt.Sprintf("%s: %s\n", role, m.Content)
+	}
+
+	prompt := "Summarize the following conversation history in 3-5 sentences, capturing key topics, tone, and important details."
+	if prevContext != "" {
+		prompt += "\n\nCumulative context from previous summaries:\n" + prevContext
+	}
+	prompt += "\n\nNew messages to incorporate:\n" + body
+
+	model := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
+	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
+	apiKey := w.Store.GetConfigValue("llm_key", "")
+	client := w.Engine.NewLLM(baseURL, apiKey)
+	reply, err := client.Chat(ctx, model, []llm.Message{
+		{Role: "system", Content: "You are a precise conversation summarizer. Always produce a single self-contained summary that includes all historical context."},
+		{Role: "user", Content: prompt},
 	})
 	if err != nil {
-		fmt.Printf("Summarize LLM error: %v\n", err)
-		return
+		return err
 	}
 
-	// Get last message ID for coverage
-	lastMsgID := ""
-	if len(allMsgs) > 0 {
-		lastMsgID = allMsgs[len(allMsgs)-1].ID
+	// Delete old summaries before inserting the new all-inclusive one.
+	if err := w.Store.DeleteAllSummariesForConversation(conversationID); err != nil {
+		return fmt.Errorf("delete old summaries: %w", err)
 	}
-
-	// Store summary
-	sm := &db.Summary{
-		ID:                    uuid.NewString(),
-		ConversationID:        convID,
-		SummaryText:           reply,
-		CoversUpToMessageID:   lastMsgID,
-		EstimatedTokenCount:   len(reply) / 4,
+	if err := w.Store.InsertSummary(&db.Summary{ConversationID: conversationID, Text: reply}); err != nil {
+		return err
 	}
-	w.store.SaveSummary(sm)
-	fmt.Printf("Summarized conversation %s: %d messages covered\n", convID, len(unsummarized))
+	// Delete ALL messages that were just summarized.
+	if err := w.Store.DeleteAllMessages(conversationID); err != nil {
+		return fmt.Errorf("delete summarized messages: %w", err)
+	}
+	return nil
 }
 
-func getInt(m map[string]interface{}, key string, def int) int {
-	if v, ok := m[key]; ok {
-		if i, ok := v.(int); ok { return i }
+func estimateTokensFor(store *db.Store, conversationID string, count int) int {
+	msgs, err := store.RecentMessages(conversationID, count)
+	if err != nil {
+		return 0
 	}
-	return def
+	total := 0
+	for _, m := range msgs {
+		total += len(m.Content) / 4
+	}
+	return total
+}
+
+func atoi(s string, def int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
 }

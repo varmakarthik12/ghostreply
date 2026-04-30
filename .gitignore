@@ -40,3 +40,4 @@ build/
 *.db-wal
 *.db-shm
 .env
+ghostreply

@@ -1,37 +1,37 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
-	"time"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/varmakarthik12/ghostreply/internal/chat"
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/summary"
 )
 
 type API struct {
-	store   *db.Store
-	engine  *chat.Engine
-	worker  *summary.Worker
-	token   string
-	ollamaURL string
+	Store  *db.Store
+	Engine *chat.Engine
+	Worker *summary.Worker
+	Token  string
+	LLMURL string
 }
 
-func NewAPI(store *db.Store, token, ollamaURL string) *API {
-	engine := chat.NewEngine(store)
-	worker := summary.NewWorker(store)
-	worker.Start()
-	return &API{store: store, engine: engine, worker: worker, token: token, ollamaURL: ollamaURL}
+func NewAPI(store *db.Store, token, llmURL string, factory chat.LLMClientFactory) *API {
+	engine := chat.NewEngine(store, llmURL, factory)
+	worker := summary.NewWorker(store, engine, 0)
+	return &API{Store: store, Engine: engine, Worker: worker, Token: token, LLMURL: llmURL}
 }
 
 func (a *API) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if token == "" || token != a.token {
-			w.WriteHeader(http.StatusUnauthorized)
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == "" || got != a.Token {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -39,245 +39,421 @@ func (a *API) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func (a *API) Mount(r chi.Router) {
-	r.Use(a.AuthMiddleware)
-	// Chat
-	r.Post("/chat/{conversationId}", a.handleChat)
-	// Integrations
-	r.Get("/integrations", a.listIntegrations)
-	r.Post("/integrations", a.createIntegration)
-	r.Get("/integrations/{id}", a.getIntegration)
-	r.Delete("/integrations/{id}", a.deleteIntegration)
-	// Conversations
-	r.Get("/integrations/{integrationId}/conversations", a.listConversations)
-	r.Post("/integrations/{integrationId}/conversations", a.createConversation)
-	r.Get("/conversations/{id}", a.getConversation)
-	r.Put("/conversations/{id}", a.updateConversation)
-	r.Delete("/conversations/{id}", a.deleteConversation)
-	r.Get("/conversations/{id}/messages", a.getMessages)
-	r.Post("/conversations/{id}/summarize", a.manualSummarize)
-	r.Get("/conversations/{id}/summary", a.getSummary)
-	// System Prompts
-	r.Get("/system-prompts", a.getSystemPrompts)
-	r.Post("/system-prompts", a.saveSystemPrompt)
-	r.Put("/system-prompts/{id}", a.saveSystemPrompt)
-	r.Delete("/system-prompts/{id}", a.deleteSystemPrompt)
-	// Config
-	r.Get("/config", a.getConfig)
-	r.Put("/config", a.setConfig)
-	r.Delete("/config/{id}", a.deleteConfig)
-	// Model Config
-	r.Get("/model-config", a.getModelConfig)
-	r.Put("/model-config", a.saveModelConfig)
-	r.Get("/model-config/ollama-models", a.listOllamaModels)
-	// Identity Links
-	r.Get("/identity-links", a.getIdentityLinks)
-	r.Post("/identity-links", a.createIdentityLink)
-	r.Delete("/identity-links/{id}", a.deleteIdentityLink)
+	// Webhook is unauthenticated — typically called by a platform proxy.
+	r.Post("/webhook", a.webhook)
+
+	r.Group(func(r chi.Router) {
+		r.Use(a.AuthMiddleware)
+
+		r.Get("/integrations", a.listIntegrations)
+		r.Post("/integrations", a.createIntegration)
+		r.Put("/integrations/{id}", a.updateIntegration)
+		r.Delete("/integrations/{id}", a.deleteIntegration)
+
+		r.Get("/conversations", a.listConversations)
+		r.Post("/conversations", a.createConversation)
+		r.Delete("/conversations/{id}", a.deleteConversation)
+
+		r.Get("/messages", a.listMessages)
+		r.Post("/messages", a.createMessage)
+		r.Delete("/messages/{id}", a.deleteMessage)
+
+		r.Get("/configs", a.listConfigs)
+		r.Post("/configs", a.createConfig)
+		r.Put("/configs/{id}", a.updateConfig)
+		r.Delete("/configs/{id}", a.deleteConfig)
+
+		r.Get("/model-configs", a.listModelConfigs)
+		r.Post("/model-configs", a.createModelConfig)
+		r.Put("/model-configs/{id}", a.updateModelConfig)
+		r.Delete("/model-configs/{id}", a.deleteModelConfig)
+
+		r.Get("/summaries", a.listSummaries)
+		r.Post("/summaries", a.triggerSummary)
+		r.Delete("/summaries/{id}", a.deleteSummary)
+
+		r.Get("/identity-links", a.listIdentityLinks)
+		r.Post("/identity-links", a.createIdentityLink)
+		r.Delete("/identity-links/{id}", a.deleteIdentityLink)
+
+		r.Get("/system-prompts", a.listSystemPrompts)
+		r.Post("/system-prompts", a.createSystemPrompt)
+		r.Put("/system-prompts/{id}", a.updateSystemPrompt)
+		r.Delete("/system-prompts/{id}", a.deleteSystemPrompt)
+
+		r.Get("/stats", a.stats)
+	})
 }
 
-// Chat handler
-func (a *API) handleChat(w http.ResponseWriter, r *http.Request) {
-	convID := chi.URLParam(r, "conversationId")
-	var req chat.ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+// ----- helpers -----
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decodeBody(r *http.Request, v interface{}) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
+// ----- webhook -----
+
+func (a *API) webhook(w http.ResponseWriter, r *http.Request) {
+	var req chat.WebhookRequest
+	if err := decodeBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if req.ConversationID == "" {
-		req.ConversationID = convID
-	}
-	resp, err := a.engine.HandleChat(r.Context(), req)
+	resp, err := a.Engine.HandleWebhook(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if errors.Is(err, chat.ErrIntegrationNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "integration not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
-// Integrations
+// ----- integrations -----
+
 func (a *API) listIntegrations(w http.ResponseWriter, r *http.Request) {
-	list, _ := a.store.ListIntegrations()
-	json.NewEncoder(w).Encode(list)
+	out, err := a.Store.ListIntegrations()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 func (a *API) createIntegration(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ID          string `json:"id"`
-		AppType     string `json:"app_type"`
-		DisplayName string `json:"display_name"`
+	var i db.Integration
+	if err := decodeBody(r, &i); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&body)
-	a.store.CreateIntegration(body.ID, body.AppType, body.DisplayName)
-	w.WriteHeader(http.StatusCreated)
+	if i.Active == 0 {
+		i.Active = 1
+	}
+	if err := a.Store.CreateIntegration(&i); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 201, i)
 }
 
-func (a *API) getIntegration(w http.ResponseWriter, r *http.Request) {
+func (a *API) updateIntegration(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	i, _ := a.store.GetIntegration(id)
-	json.NewEncoder(w).Encode(i)
+	var i db.Integration
+	if err := decodeBody(r, &i); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	i.ID = id
+	if err := a.Store.UpdateIntegration(&i); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, i)
 }
 
 func (a *API) deleteIntegration(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	a.store.DeleteIntegration(id)
+	if err := a.Store.DeleteIntegration(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Conversations
+// ----- conversations -----
+
 func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
-	integrationID := chi.URLParam(r, "integrationId")
-	list, _ := a.store.ListConversations(integrationID)
-	json.NewEncoder(w).Encode(list)
+	out, err := a.Store.ListConversations(r.URL.Query().Get("integration_id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 func (a *API) createConversation(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ID                string `json:"id"`
-		ConvType          string `json:"conv_type"`
-		TargetDisplayName string `json:"target_display_name"`
+	var c db.Conversation
+	if err := decodeBody(r, &c); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&body)
-	integrationID := chi.URLParam(r, "integrationId")
-	c := &db.Conversation{
-		ID:                body.ID,
-		IntegrationID:     integrationID,
-		ConvType:          body.ConvType,
-		TargetDisplayName: body.TargetDisplayName,
+	if err := a.Store.CreateConversation(&c); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
 	}
-	a.store.CreateConversation(c)
-	w.WriteHeader(http.StatusCreated)
-}
-
-func (a *API) getConversation(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	c, _ := a.store.GetConversation(id)
-	json.NewEncoder(w).Encode(c)
-}
-
-func (a *API) updateConversation(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var body struct {
-		ConvType          string `json:"conv_type"`
-		TargetDisplayName string `json:"target_display_name"`
-	}
-	json.NewDecoder(r.Body).Decode(&body)
-	c := &db.Conversation{ID: id, ConvType: body.ConvType, TargetDisplayName: body.TargetDisplayName}
-	a.store.UpdateConversation(c)
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, 201, c)
 }
 
 func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	a.store.DeleteConversation(id)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *API) getMessages(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	limit := 50
-	msgs, _ := a.store.GetMessages(id, limit)
-	json.NewEncoder(w).Encode(msgs)
-}
-
-func (a *API) manualSummarize(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	// Trigger via worker
-	json.NewEncoder(w).Encode(map[string]string{"status": "triggered", "conversation_id": id})
-}
-
-func (a *API) getSummary(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	sm, _ := a.store.GetSummary(id)
-	json.NewEncoder(w).Encode(sm)
-}
-
-// System Prompts
-func (a *API) getSystemPrompts(w http.ResponseWriter, r *http.Request) {
-	scope := r.URL.Query().Get("scope")
-	scopeID := r.URL.Query().Get("scope_id")
-	list, _ := a.store.GetSystemPrompts(scope, scopeID, false)
-	json.NewEncoder(w).Encode(list)
-}
-
-func (a *API) saveSystemPrompt(w http.ResponseWriter, r *http.Request) {
-	var p db.SystemPrompt
-	json.NewDecoder(r.Body).Decode(&p)
-	if p.ID == "" { p.ID = uuid.NewString() }
-	a.store.SaveSystemPrompt(&p)
-	w.WriteHeader(http.StatusCreated)
-}
-
-func (a *API) deleteSystemPrompt(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	a.store.DeleteSystemPrompt(id)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// Config
-func (a *API) getConfig(w http.ResponseWriter, r *http.Request) {
-	merged := a.store.GetMergedConfig("")
-	json.NewEncoder(w).Encode(merged)
-}
-
-func (a *API) setConfig(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Scope    string      `json:"scope"`
-		ScopeID  string      `json:"scope_id"`
-		Key      string      `json:"key"`
-		Value    interface{} `json:"value"`
+	if err := a.Store.DeleteConversation(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&body)
-	a.store.SetConfig(body.Scope, body.ScopeID, body.Key, body.Value)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----- messages -----
+
+func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
+	convID := r.URL.Query().Get("conversation_id")
+	if convID == "" {
+		writeJSON(w, 400, map[string]string{"error": "conversation_id required"})
+		return
+	}
+	out, err := a.Store.ListMessages(convID, 50)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
+func (a *API) createMessage(w http.ResponseWriter, r *http.Request) {
+	var m db.Message
+	if err := decodeBody(r, &m); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if m.DedupHash == "" {
+		m.DedupHash = db.DedupHash(m.ConversationID, m.Content)
+	}
+	if err := a.Store.InsertMessage(&m); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 201, m)
+}
+
+func (a *API) deleteMessage(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.DeleteMessage(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----- configs -----
+
+func (a *API) listConfigs(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Store.ListConfigs(r.URL.Query().Get("scope"), r.URL.Query().Get("scope_id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
+func (a *API) createConfig(w http.ResponseWriter, r *http.Request) {
+	var c db.Config
+	if err := decodeBody(r, &c); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.UpsertConfig(&c); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 201, c)
+}
+
+func (a *API) updateConfig(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.UpdateConfig(id, body.Key, body.Value); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"id": id})
 }
 
 func (a *API) deleteConfig(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.DeleteConfig(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Model Config
-func (a *API) getModelConfig(w http.ResponseWriter, r *http.Request) {
-	scope := r.URL.Query().Get("scope")
-	scopeID := r.URL.Query().Get("scope_id")
-	c, _ := a.store.GetModelConfig(scope, scopeID)
-	json.NewEncoder(w).Encode(c)
-}
+// ----- model configs -----
 
-func (a *API) saveModelConfig(w http.ResponseWriter, r *http.Request) {
-	var c db.ModelConfig
-	json.NewDecoder(r.Body).Decode(&c)
-	if c.ID == "" { c.ID = uuid.NewString() }
-	a.store.SaveModelConfig(&c)
-	w.WriteHeader(http.StatusCreated)
-}
-
-func (a *API) listOllamaModels(w http.ResponseWriter, r *http.Request) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(a.ollamaURL + "/api/tags")
+func (a *API) listModelConfigs(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Store.ListModelConfigs()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	defer resp.Body.Close()
-	http.ResponseWriter.Write(w, make([]byte, resp.ContentLength))
-	resp.Body.Read(make([]byte, resp.ContentLength))
+	writeJSON(w, 200, out)
 }
 
-// Identity Links
-func (a *API) getIdentityLinks(w http.ResponseWriter, r *http.Request) {
-	list, _ := a.store.GetIdentityLinks()
-	json.NewEncoder(w).Encode(list)
+func (a *API) createModelConfig(w http.ResponseWriter, r *http.Request) {
+	var m db.ModelConfig
+	if err := decodeBody(r, &m); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.UpsertModelConfig(&m); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 201, m)
+}
+
+func (a *API) updateModelConfig(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Value string `json:"value"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.UpdateModelConfig(id, body.Value); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"id": id})
+}
+
+func (a *API) deleteModelConfig(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.DeleteModelConfig(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----- summaries -----
+
+func (a *API) listSummaries(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Store.ListSummaries(r.URL.Query().Get("conversation_id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
+func (a *API) triggerSummary(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if body.ConversationID == "" {
+		writeJSON(w, 400, map[string]string{"error": "conversation_id required"})
+		return
+	}
+	go a.Worker.Summarize(context.Background(), body.ConversationID)
+	writeJSON(w, 202, map[string]string{"status": "triggered", "conversation_id": body.ConversationID})
+}
+
+func (a *API) deleteSummary(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.DeleteSummary(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----- identity links -----
+
+func (a *API) listIdentityLinks(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Store.ListIdentityLinks()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 func (a *API) createIdentityLink(w http.ResponseWriter, r *http.Request) {
 	var l db.IdentityLink
-	json.NewDecoder(r.Body).Decode(&l)
-	a.store.CreateIdentityLink(&l)
-	w.WriteHeader(http.StatusCreated)
+	if err := decodeBody(r, &l); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.CreateIdentityLink(&l); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 201, l)
 }
 
 func (a *API) deleteIdentityLink(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	a.store.DeleteIdentityLink(id)
+	if err := a.Store.DeleteIdentityLink(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----- system prompts -----
+
+func (a *API) listSystemPrompts(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Store.ListSystemPrompts()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
+func (a *API) createSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	var p db.SystemPrompt
+	if err := decodeBody(r, &p); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.CreateSystemPrompt(&p); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 201, p)
+}
+
+func (a *API) updateSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.Store.UpdateSystemPrompt(id, body.Text); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"id": id})
+}
+
+func (a *API) deleteSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.DeleteSystemPrompt(chi.URLParam(r, "id")); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ----- stats -----
+
+func (a *API) stats(w http.ResponseWriter, r *http.Request) {
+	i, c, m := a.Store.Stats()
+	writeJSON(w, 200, map[string]int{"integrations": i, "conversations": c, "messages": m})
 }

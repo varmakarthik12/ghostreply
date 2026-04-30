@@ -2,151 +2,151 @@ package chat
 
 import (
 	"context"
-	"sync"
-	"time"
+	"errors"
+	"fmt"
+	"strconv"
 
-	"github.com/google/uuid"
 	"github.com/varmakarthik12/ghostreply/internal/db"
+	"github.com/varmakarthik12/ghostreply/internal/llm"
 )
 
-var (
-	inflight  sync.Map // conversationId -> context.CancelFunc
-	convMutex sync.Map // conversationId -> *sync.Mutex
-)
+const DefaultModel = "llama3.2"
 
-func getConvMutex(convID string) *sync.Mutex {
-	actual, _ := convMutex.LoadOrStore(convID, &sync.Mutex{})
-	return actual.(*sync.Mutex)
-}
+// LLMClientFactory builds an LLM client from a base URL and API key.
+// Tests inject a stub; main wires the real one.
+type LLMClientFactory func(baseURL, apiKey string) LLM
 
-type ChatRequest struct {
-	IntegrationID    string                `json:"integration_id"`
-	ConversationType string                `json:"conversation_type"` // individual|group
-	ConversationID   string                `json:"conversation_id,omitempty"`
-	ForceReply       bool                  `json:"force_reply"`
-	Messages         []db.IncomingMessage  `json:"messages"`
-}
-
-type ChatResponse struct {
-	Reply         string `json:"reply,omitempty"`
-	ConversationID string `json:"conversation_id"`
-	Skipped       bool   `json:"skipped"`
-	SkipReason    string `json:"skip_reason,omitempty"` // group_no_force|waiting_for_target|duplicate_only
+type LLM interface {
+	Chat(ctx context.Context, model string, msgs []llm.Message) (string, error)
 }
 
 type Engine struct {
-	store *db.Store
+	Store  *db.Store
+	LLMURL string
+	NewLLM LLMClientFactory
 }
 
-func NewEngine(store *db.Store) *Engine { return &Engine{store: store} }
-
-func (e *Engine) HandleChat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-	convID := req.ConversationID
-	if convID == "" {
-		convID = req.IntegrationID + "::" + uuid.NewString()
+func NewEngine(store *db.Store, llmURL string, factory LLMClientFactory) *Engine {
+	if factory == nil {
+		factory = func(baseURL, apiKey string) LLM { return llm.NewClient(baseURL, apiKey) }
 	}
-
-	// Auto-create integration if not exists
-	if existingIntegration, _ := e.store.GetIntegration(req.IntegrationID); existingIntegration == nil {
-		e.store.CreateIntegration(req.IntegrationID, "custom", req.IntegrationID)
-	}
-	// Auto-create conversation if not exists
-	if existingConv, _ := e.store.GetConversation(convID); existingConv == nil {
-		c := &db.Conversation{ID: convID, IntegrationID: req.IntegrationID, ConvType: req.ConversationType}
-		e.store.CreateConversation(c)
-	}
-
-	// Step 2: Save messages, skip duplicates
-	insertedCount := 0
-	for _, m := range req.Messages {
-		deh := db.DedupHash(m.Content, m.SenderID, m.Timestamp.Unix())
-		exists, _ := e.store.MessageExists(convID, deh)
-		if !exists {
-			deh2 := deh + "_" + m.SenderType
-			e.store.SaveMessage(m, convID, deh2)
-			insertedCount++
-		}
-	}
-
-	// Step 3: In-flight management
-	mutex := getConvMutex(convID)
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	if val, ok := inflight.Load(convID); ok {
-		if cancel, ok2 := val.(context.CancelFunc); ok2 && cancel != nil {
-			cancel()
-		}
-	}
-	reqCtx, cancel := context.WithCancel(ctx)
-	inflight.Store(convID, cancel)
-	defer func() { inflight.Delete(convID); cancel() }()
-
-	// Step 4: Resolve config
-	config := e.store.GetMergedConfig(convID)
-
-	// Step 5: Group reply guard
-	if req.ConversationType == "group" {
-		if !getBool(config, "auto_reply_groups") && !req.ForceReply {
-			return &ChatResponse{ConversationID: convID, Skipped: true, SkipReason: "group_no_force"}, nil
-		}
-	}
-
-	// Step 6: Multi-reply guard
-	if !getBool(config, "allow_multi_reply") {
-		last, _ := e.store.GetLastMessage(convID)
-		if last != nil && last.SenderType == "host" {
-			return &ChatResponse{ConversationID: convID, Skipped: true, SkipReason: "waiting_for_target"}, nil
-		}
-	}
-
-	// Step 7: Duplicate-only guard
-	if insertedCount == 0 && len(req.Messages) > 0 {
-		return &ChatResponse{ConversationID: convID, Skipped: true, SkipReason: "duplicate_only"}, nil
-	}
-
-	// Step 8-9: Assemble context and call LLM
-	assembly := NewContextAssembler(e.store, convID, req.IntegrationID, config)
-	systemPrompt, turns, err := assembly.Assemble()
-	if err != nil {
-		return nil, err
-	}
-	modelCfg := e.store.GetEffectiveModelConfig(convID, req.IntegrationID)
-	provider, err := NewProviderFromConfig(modelCfg)
-	if err != nil {
-		return nil, err
-	}
-	// Token budget check
-	fullPrompt := systemPrompt
-	for _, t := range turns { fullPrompt += "\n" + t.Content }
-	estimated := provider.EstimateTokens(fullPrompt)
-	maxAllowed := int(float64(provider.ContextWindow()) * 0.80)
-	for estimated > maxAllowed && len(turns) > 10 {
-		turns = turns[1:]
-		fullPrompt = systemPrompt
-		for _, t := range turns { fullPrompt += "\n" + t.Content }
-		estimated = provider.EstimateTokens(fullPrompt)
-	}
-	reply, err := provider.Chat(reqCtx, systemPrompt, turns)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 10: Persist reply as host message
-	replyMsg := db.IncomingMessage{
-		Timestamp:  time.Now().UTC(),
-		Content:    reply,
-		SenderType: "host",
-		SenderID:   "host",
-	}
-	e.store.SaveMessage(replyMsg, convID, db.DedupHash(reply, "host", replyMsg.Timestamp.Unix()))
-
-	return &ChatResponse{Reply: reply, ConversationID: convID, Skipped: false}, nil
+	return &Engine{Store: store, LLMURL: llmURL, NewLLM: factory}
 }
 
-func getBool(m map[string]interface{}, key string) bool {
-	if v, ok := m[key]; ok {
-		if b, ok := v.(bool); ok { return b }
+type WebhookRequest struct {
+	Text     string `json:"text"`
+	Platform string `json:"platform"`
+	ChatID   string `json:"chat_id"`
+}
+
+type WebhookResponse struct {
+	Reply string `json:"reply"`
+}
+
+var ErrIntegrationNotFound = errors.New("integration not found")
+
+// HandleWebhook implements the 13-step flow from the spec.
+func (e *Engine) HandleWebhook(ctx context.Context, req WebhookRequest) (*WebhookResponse, error) {
+	// 2. Find active integration by platform.
+	integration, err := e.Store.GetActiveIntegrationByPlatform(req.Platform)
+	if err != nil {
+		return nil, ErrIntegrationNotFound
 	}
-	return false
+
+	// 3. Find or create conversation.
+	conv, err := e.Store.FindConversation(integration.ID, req.ChatID)
+	if err != nil {
+		conv = &db.Conversation{
+			IntegrationID: integration.ID,
+			ExternalID:    req.ChatID,
+			Title:         req.ChatID,
+		}
+		if err := e.Store.CreateConversation(conv); err != nil {
+			return nil, fmt.Errorf("create conversation: %w", err)
+		}
+	}
+
+	// 4. Dedup check.
+	hash := db.DedupHash(conv.ID, req.Text)
+	if existing, err := e.Store.FindMessageByDedup(hash); err == nil && existing != nil {
+		if last, err := e.Store.LastOutboundMessage(conv.ID); err == nil && last != nil {
+			return &WebhookResponse{Reply: last.Content}, nil
+		}
+		return &WebhookResponse{Reply: ""}, nil
+	}
+
+	// 5. Insert incoming message.
+	if err := e.Store.InsertMessage(&db.Message{
+		ConversationID: conv.ID,
+		IsOutbound:     0,
+		Content:        req.Text,
+		DedupHash:      hash,
+	}); err != nil {
+		return nil, fmt.Errorf("insert incoming: %w", err)
+	}
+
+	// 6. Context: latest summary + last N messages.
+	maxN := atoiDefault(e.Store.GetConfigValue("max_context_messages", "20"), 20)
+	recent, err := e.Store.RecentMessages(conv.ID, maxN)
+	if err != nil {
+		return nil, fmt.Errorf("recent messages: %w", err)
+	}
+	summaryText := ""
+	if sm, err := e.Store.LatestSummary(conv.ID); err == nil && sm != nil {
+		summaryText = sm.Text
+	}
+
+	// 7. Persona.
+	persona := e.Store.ResolvePersona(conv.ID, integration.ID)
+
+	// 8. Model.
+	model := e.Store.ResolveModel(conv.ID, integration.ID, DefaultModel)
+
+	// 9. Build LLM messages.
+	system := persona
+	if system != "" {
+		system += "\n\n"
+	}
+	system += "You are responding on behalf of the host user.\nBe natural, casual, match their tone."
+	if summaryText != "" {
+		system += "\n\nContext summary:\n" + summaryText
+	}
+	msgs := []llm.Message{{Role: "system", Content: system}}
+	for _, m := range recent {
+		role := "user"
+		if m.IsOutbound == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, llm.Message{Role: role, Content: m.Content})
+	}
+
+	// 10. Call LLM.
+	baseURL := e.Store.GetConfigValue("llm_url", e.LLMURL)
+	apiKey := e.Store.GetConfigValue("llm_key", "")
+	client := e.NewLLM(baseURL, apiKey)
+	reply, err := client.Chat(ctx, model, msgs)
+	if err != nil {
+		return nil, fmt.Errorf("llm: %w", err)
+	}
+
+	// 11/12. Persist reply.
+	if err := e.Store.InsertMessage(&db.Message{
+		ConversationID: conv.ID,
+		IsOutbound:     1,
+		Content:        reply,
+		DedupHash:      db.DedupHash(conv.ID, "out:"+reply),
+	}); err != nil {
+		return nil, fmt.Errorf("insert reply: %w", err)
+	}
+
+	// 13. Return.
+	return &WebhookResponse{Reply: reply}, nil
+}
+
+func atoiDefault(s string, def int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
 }
