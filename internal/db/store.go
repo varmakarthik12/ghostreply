@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type Store struct {
@@ -18,9 +18,9 @@ type Store struct {
 func NewStore(path string) (*Store, error) {
 	dsn := path
 	if path != ":memory:" {
-		dsn = path + "?_foreign_keys=on"
+		dsn = path + "?_pragma=foreign_keys(1)"
 	}
-	d, err := sql.Open("sqlite3", dsn)
+	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

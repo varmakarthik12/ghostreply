@@ -7,6 +7,8 @@ dev:
 
 dev-backend:
 	@echo "Starting Go backend with Air (hot reload)..."
+	@if not exist "ui\dist" mkdir "ui\dist"
+	@if not exist "ui\dist\.gitkeep" echo. > "ui\dist\.gitkeep"
 	air
 
 dev-frontend:
