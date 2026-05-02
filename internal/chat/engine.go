@@ -93,7 +93,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		conv = &db.Conversation{
 			IntegrationID: req.IntegrationID,
 			ExternalID:    req.ConversationID,
-			Title:         req.ConversationID,
+			Title:         req.SenderName,
 			ChatType:      req.ChatType,
 		}
 		if err := e.Store.CreateConversation(conv); err != nil {
