@@ -333,7 +333,27 @@ func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.Query(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE conversation_id=? ORDER BY timestamp DESC LIMIT ?`, conversationID, limit)
+	// Use ROW_NUMBER() to deduplicate by conversation_id, direction (is_outbound), content, and timestamp.
+	// This handles cases where duplicates might exist due to race conditions or sync issues.
+	q := `
+		SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp
+		FROM (
+			SELECT id, conversation_id, is_outbound, content, 
+			       COALESCE(sender_id,'') as sender_id, 
+			       COALESCE(sender_name,'') as sender_name, 
+			       COALESCE(dedup_hash,'') as dedup_hash, 
+			       timestamp,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY conversation_id, is_outbound, content, timestamp 
+			           ORDER BY id
+			       ) as rn
+			FROM messages
+			WHERE conversation_id=?
+		)
+		WHERE rn = 1
+		ORDER BY timestamp DESC
+		LIMIT ?`
+	rows, err := s.DB.Query(q, conversationID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +384,13 @@ func (s *Store) RecentMessages(conversationID string, limit int) ([]Message, err
 
 func (s *Store) CountMessages(conversationID string) (int, error) {
 	var n int
-	err := s.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id=?`, conversationID).Scan(&n)
+	q := `
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM messages 
+			WHERE conversation_id=? 
+			GROUP BY conversation_id, is_outbound, content, timestamp
+		)`
+	err := s.DB.QueryRow(q, conversationID).Scan(&n)
 	return n, err
 }
 
@@ -385,15 +411,6 @@ func (s *Store) FindMessageByDedup(hash string) (*Message, error) {
 		return nil, sql.ErrNoRows
 	}
 	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE dedup_hash=?`, hash)
-	var m Message
-	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
-
-func (s *Store) LastOutboundMessage(conversationID string) (*Message, error) {
-	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE conversation_id=? AND is_outbound=1 ORDER BY timestamp DESC LIMIT 1`, conversationID)
 	var m Message
 	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
 		return nil, err

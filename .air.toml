@@ -4,7 +4,7 @@ tmp_dir = "tmp"
 
 [build]
   cmd = "go build -o ./tmp/main.exe ./cmd/ghostreply/main.go"
-  entrypoint = ["./tmp/main.exe"]
+  bin = "tmp\\main.exe"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "ui"]
   exclude_file = []
