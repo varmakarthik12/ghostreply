@@ -103,7 +103,7 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 		if i == 0 {
 			prevContext = sm.Text
 		} else {
-			prevContext += "\n\n" + sm.Text
+			prevContext += "\n" + sm.Text
 		}
 	}
 
@@ -119,38 +119,28 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 		body += fmt.Sprintf("%s: %s\n", label, m.Content)
 	}
 
-	prompt := `You are building a memory summary that will be injected into a chat AI's system prompt to help it reply naturally as a specific person.
-
-Your job is NOT to write a story recap. Instead, produce a structured summary that the AI can use to:
-1. Sound exactly like the same person who wrote the previous messages
-2. Remember what the other person shared and bring it up naturally
-3. Continue the emotional tone and relationship dynamic
-
-Format your summary like this:
-
-**My speaking style:** [Describe how "me" texts — sentence length, vocabulary, use of humor, level of formality, any recurring phrases or quirks]
-
-**Relationship dynamic:** [How do we talk to each other? Flirty, friendly, playful, guarded, warm? What's the vibe?]
-
-**What they've shared about themselves:** [List any personal details, feelings, stories or facts the other person mentioned]
-
-**What I've shared about myself:** [List any personal details, feelings, or stories I mentioned — be vague if nothing concrete was said]
-
-**Recent conversation thread:** [2-3 sentence description of what we were just talking about and the emotional direction of the conversation]
-
-**Active topics / things to follow up on:** [Anything left open, questions that weren't answered, things that felt important]`
+	prompt := "You are building a memory summary that will be injected into a chat AI system prompt to help it reply naturally as a specific person." + "\n"
+	prompt += "Your job is NOT to write a story recap and NOT to create a list of topics to redirect the conversation to." + "\n"
+	prompt += "Produce a structured snapshot the AI uses to: sound like the same person, remember what the other person shared, and match the emotional tone." + "\n\n"
+	prompt += "Format your output using exactly these section headers:" + "\n\n"
+	prompt += "**My speaking style:** How does 'me' text? Sentence length, vocabulary, humor level, formality, recurring words or phrases, quirks." + "\n\n"
+	prompt += "**Relationship dynamic:** How do we talk to each other? Flirty, friendly, playful, guarded? What is the vibe and push-pull between us?" + "\n\n"
+	prompt += "**What they've shared about themselves:** Personal details, feelings, stories, preferences the other person mentioned." + "\n\n"
+	prompt += "**What I've shared about myself:** Personal details or stories I mentioned. Be vague where nothing concrete was said." + "\n\n"
+	prompt += "**Recent conversation thread:** 2-3 sentences on what we were just talking about and the emotional direction." + "\n\n"
+	prompt += "**Active context:** Background things to be aware of — NOT topics to redirect to. Just things that might come up naturally." + "\n"
 
 	if prevContext != "" {
-		prompt += "\n\n---\nPrevious memory (keep this, update it with new info):\n" + prevContext
+		prompt += "---" + "\n" + "Previous memory (keep this, update it with new info):" + "\n" + prevContext + "\n"
 	}
-	prompt += "\n\n---\nNew messages to incorporate:\n" + body
+	prompt += "---" + "\n" + "New messages to incorporate:" + "\n" + body
 
 	model := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
 	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
 	apiKey := w.Store.GetConfigValue("llm_key", "")
 	client := w.Engine.NewLLM(baseURL, apiKey)
 	reply, err := client.Chat(ctx, model, []llm.Message{
-		{Role: "system", Content: "You are a conversation memory writer. Your output will be injected directly into a chat AI's system prompt to help it impersonate a real person accurately. Be specific, structured, and useful — not generic. Preserve all prior memory and update it with new information."},
+		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific and structured. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
 	})
 	if err != nil {

@@ -120,6 +120,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 			}
 		}
 		if allAssistant {
+			log.Printf("[DEBUG] Skipping auto-reply: maximum consecutive assistant messages reached (%d)", maxConsecutive)
 			return &WebhookResponse{Reply: ""}, nil
 		}
 	}
@@ -205,31 +206,29 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	}
 
 	if conv.ChatType != "" {
-		system += fmt.Sprintf("You are in a %s chat. Stay fully in character — never break the persona.\n", conv.ChatType)
+		system += fmt.Sprintf("You are in a %s chat. Stay fully in character — never break the persona.", conv.ChatType) + "\n"
 	}
 
 	if summaryText != "" {
-		system += `## Memory — read this carefully before every reply
-This is a structured memory of the conversation so far. Use each section as follows:
-
-- **My speaking style** → Write exactly like this. Copy the rhythm, vocabulary, and quirks described.
-- **Relationship dynamic** → Match the emotional tone between us. Keep that same energy.
-- **What they've shared** → Remember this. Bring it up naturally when relevant — don't ignore it.
-- **What I've shared** → Stay consistent. Never contradict your own past self.
-- **Recent conversation thread** → This is the emotional direction we were heading. Continue it.
-- **Active topics / follow-ups** → These are your priority. Pick up open threads naturally.
-
-` + summaryText + "\n\n"
+		system += "## Background memory" + "\n"
+		system += "This gives you context about the person and how the conversation has been going. Use it to stay consistent — your voice, your past, the vibe between you. Do NOT use this as an agenda. Do NOT redirect the conversation back to anything listed here. Just be aware of it." + "\n"
+		system += "- My speaking style: copy it exactly. Rhythm, vocab, quirks." + "\n"
+		system += "- Relationship dynamic: match the emotional energy." + "\n"
+		system += "- What they've shared: remember it. Bring it up only if it fits naturally." + "\n"
+		system += "- What I've shared: stay consistent. Never contradict yourself." + "\n"
+		system += "- Recent thread and active topics: awareness only. Follow where the conversation goes NOW, not where it was." + "\n"
+		system += summaryText + "\n"
 	}
 
 	if style == "detailed" {
-		system += "Go deeper when it feels natural — share more, ask follow-ups, be emotionally present."
+		system += "Go deeper when it feels right — share more, ask follow-ups, be emotionally present." + "\n"
 	} else {
-		system += "Reply the way a real person texts — short, natural, sometimes incomplete sentences. Never write a wall of text. 1 to 3 sentences max unless the moment calls for more."
+		system += "Reply like a real person texting — casual, short, sometimes trailing off. One thought at a time. No walls of text. 1 to 2 sentences is usually enough." + "\n"
 	}
 
-	// Keep the conversation on track
-	system += "\n\nFollow the conversation naturally. Pick up on what was last said. If you shift topics, make it feel organic — like a real person who got distracted, not a bot trying to escape a question."
+	system += "Never use line breaks or newlines in your reply. Write everything as one flowing text, like a real text message." + "\n"
+	system += "Never comment on how many messages were sent at once. Never say you need a brain reset or that you are overwhelmed. Just reply to the most recent thing naturally." + "\n"
+	system += "Reply to what was just said. Do not drag old topics back into the conversation unless it comes up naturally. Follow the person's lead." + "\n"
 
 	msgs := []llm.Message{{Role: "system", Content: system}}
 	for _, m := range recent {
@@ -250,6 +249,7 @@ This is a structured memory of the conversation so far. Use each section as foll
 		log.Printf("[DEBUG] LLM Model: %s", model)
 		log.Printf("[DEBUG] LLM Messages: %v", msgs)
 	}
+
 	reply, err := client.Chat(ctx, model, msgs)
 	if err != nil {
 		log.Printf("[ERROR] LLM Chat failed: %v", err)
