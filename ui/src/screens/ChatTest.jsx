@@ -103,9 +103,7 @@ export default function ChatTest() {
           <span className="badge badge-blue">Auto-Reply V2 (Live)</span>
         </div>
 
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
-        >
+        <div className="responsive-grid">
           <Field label="Integration">
             <select value={selInt} onChange={(e) => setSelInt(e.target.value)}>
               <option value="">— select —</option>

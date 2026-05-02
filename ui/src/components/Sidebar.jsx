@@ -12,11 +12,27 @@ const NAV = [
   { id: "test", icon: "🧪", label: "Chat Test" },
 ];
 
-export default function Sidebar({ screen, onNavigate, tokenPrefix, onLogout }) {
+export default function Sidebar({
+  screen,
+  onNavigate,
+  tokenPrefix,
+  onLogout,
+  isOpen,
+  onClose,
+}) {
   return (
-    <div className="sidebar">
-      <div className="sidebar-logo">👻 GhostReply</div>
-      <nav>
+    <div className={`sidebar${isOpen ? " open" : ""}`}>
+      <div className="sidebar-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div className="sidebar-logo" style={{ border: "none", marginBottom: 0, paddingBottom: 8 }}>👻 GhostReply</div>
+        <button 
+          className="btn btn-secondary btn-sm mobile-only" 
+          onClick={onClose}
+          style={{ display: "none" }}
+        >
+          ✕
+        </button>
+      </div>
+      <nav style={{ marginTop: 8 }}>
         {NAV.map((n) => (
           <div
             key={n.id}
@@ -42,6 +58,12 @@ export default function Sidebar({ screen, onNavigate, tokenPrefix, onLogout }) {
           Change Token
         </button>
       </div>
+      <style>{`
+        @media (max-width: 768px) {
+          .mobile-only { display: block !important; }
+          .sidebar-logo { border-bottom: none !important; }
+        }
+      `}</style>
     </div>
   );
 }

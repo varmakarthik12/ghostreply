@@ -232,14 +232,7 @@ export default function Settings() {
           Default LLM endpoint and API key. Override per-integration or
           per-conversation in the table below.
         </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 12,
-            marginBottom: 12,
-          }}
-        >
+        <div className="responsive-grid" style={{ gap: 12, marginBottom: 12 }}>
           <Field label="LLM URL">
             <input
               list="llm-url-hints"
@@ -340,14 +333,7 @@ export default function Settings() {
           Quickly edit global defaults. These apply to all integrations unless
           overridden.
         </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 16,
-            marginBottom: 16,
-          }}
-        >
+        <div className="responsive-grid" style={{ gap: 16, marginBottom: 16 }}>
           {CONFIG_KEYS.filter((k) => k.group !== "llm" && k.group !== "debug").map(
             (k) => {
               const existing = (s.data || []).find(

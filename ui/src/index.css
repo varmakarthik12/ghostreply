@@ -10,6 +10,7 @@
   --red: #f85149;
   --yellow: #d29922;
   --purple: #bc8cff;
+  --sidebar-width: 220px;
 }
 
 /* ── reset ───────────────────────────────────────────── */
@@ -61,8 +62,23 @@ h3 {
   min-height: 100vh;
 }
 
+.mobile-header {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 90;
+}
+
 .sidebar {
-  width: 220px;
+  width: var(--sidebar-width);
   background: var(--card);
   border-right: 1px solid var(--border);
   padding: 12px 8px;
@@ -73,6 +89,8 @@ h3 {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  z-index: 100;
+  transition: transform 0.3s ease;
 }
 
 .sidebar-logo {
@@ -117,6 +135,42 @@ h3 {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  min-width: 0; /* Prevent flex blowout */
+}
+
+/* ── mobile specific layout ─────────────────────────── */
+@media (max-width: 768px) {
+  #root {
+    flex-direction: column;
+  }
+  .mobile-header {
+    display: flex;
+  }
+  .sidebar {
+    position: fixed;
+    left: 0;
+    transform: translateX(-100%);
+    box-shadow: 10px 0 30px rgba(0,0,0,0.5);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 95;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  .sidebar-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .main {
+    padding: 72px 16px 24px; /* Space for mobile header */
+  }
 }
 
 /* ── card ────────────────────────────────────────────── */
@@ -133,11 +187,12 @@ h3 {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto; /* Enable horizontal scroll */
 }
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 600px; /* Ensure table doesn't get too squashed */
 }
 th {
   text-align: left;
@@ -175,7 +230,8 @@ tr:hover td {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1000;
+  padding: 16px;
 }
 .modal {
   background: var(--card);
@@ -185,8 +241,15 @@ tr:hover td {
   min-width: 480px;
   max-width: 600px;
   width: 90%;
-  max-height: 80vh;
+  max-height: 90vh;
   overflow-y: auto;
+}
+@media (max-width: 600px) {
+  .modal {
+    min-width: 0;
+    width: 100%;
+    padding: 16px;
+  }
 }
 .modal-wide {
   max-width: 720px;
@@ -453,6 +516,11 @@ input[type="checkbox"] {
   gap: 12px;
   margin-bottom: 16px;
 }
+@media (max-width: 600px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .stat-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -471,6 +539,18 @@ input[type="checkbox"] {
   margin-top: 4px;
 }
 
+/* ── responsive grid utility ─────────────────────────── */
+.responsive-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+@media (max-width: 768px) {
+  .responsive-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── chat bubbles ────────────────────────────────────── */
 .bubbles {
   display: flex;
@@ -487,7 +567,7 @@ input[type="checkbox"] {
   justify-content: flex-start;
 }
 .bubble {
-  max-width: 70%;
+  max-width: 85%;
   padding: 10px 14px;
   border-radius: 12px;
   font-size: 14px;
@@ -532,6 +612,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 10px;
   margin-bottom: 16px;
+  flex-wrap: wrap; /* Allow wrapping for mobile */
 }
 .mono {
   font-family: monospace;

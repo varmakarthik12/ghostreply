@@ -21,6 +21,7 @@ export default function App() {
   const [setupDone, setSetupDone] = useState(false);
   const [checking, setChecking] = useState(true);
   const [tokenPrefix, setTokenPrefix] = useState("");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     const t = getToken();
@@ -56,12 +57,14 @@ export default function App() {
 
   function navigate(id) {
     setScreen(id);
+    setIsSidebarOpen(false); // Close sidebar on navigate (mobile)
     if (id !== "messages") setViewMsgConv(null);
   }
 
   function viewMessages(conv) {
     setViewMsgConv(conv);
     setScreen("messages");
+    setIsSidebarOpen(false);
   }
 
   if (checking) {
@@ -120,11 +123,28 @@ export default function App() {
   return (
     <>
       <ToastContainer />
+      <header className="mobile-header">
+        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>
+          👻 GhostReply
+        </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => setIsSidebarOpen(true)}
+        >
+          Menu
+        </button>
+      </header>
+      <div
+        className={`sidebar-overlay${isSidebarOpen ? " visible" : ""}`}
+        onClick={() => setIsSidebarOpen(false)}
+      />
       <Sidebar
         screen={screen}
         onNavigate={navigate}
         tokenPrefix={tokenPrefix}
         onLogout={handleLogout}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
       <main className="main">{renderScreen()}</main>
     </>

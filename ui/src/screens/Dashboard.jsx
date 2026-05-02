@@ -37,9 +37,7 @@ export default function Dashboard() {
       <div className="card">
         <h3>Server Status</h3>
         {health ? (
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
-          >
+          <div className="responsive-grid" style={{ gap: 10 }}>
             <div>
               <span
                 className={`dot dot-${health.status === "ok" ? "green" : "red"}`}
