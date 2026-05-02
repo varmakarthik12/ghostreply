@@ -234,37 +234,6 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		return nil, fmt.Errorf("llm: %w", err)
 	}
 
-	// // 5. Persist and Return
-	// // Use incoming message ID or timestamp to make reply hash unique to this request
-	// replyHashKey := req.MessageID
-	// if replyHashKey == "" {
-	// 	replyHashKey = req.Timestamp
-	// }
-	// replySenderID := req.SenderID
-	// if replySenderID == "" {
-	// 	replySenderID = "assistant"
-	// }
-	// replySenderName := req.SenderName
-	// if replySenderName == "" {
-	// 	replySenderName = "Assistant"
-	// }
-
-	// outboundHash := db.DedupHash(conv.ID, replySenderID, reply, replyHashKey)
-
-	// if err := e.Store.InsertMessage(&db.Message{
-	// 	ConversationID: conv.ID,
-	// 	IsOutbound:     1,
-	// 	Content:        reply,
-	// 	SenderID:       replySenderID,
-	// 	SenderName:     replySenderName,
-	// 	DedupHash:      outboundHash,
-	// }); err != nil {
-	// 	if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-	// 		return &WebhookResponse{Reply: reply}, nil
-	// 	}
-	// 	return nil, fmt.Errorf("insert reply: %w", err)
-	// }
-
 	resp := &WebhookResponse{Reply: reply}
 	if debugEnabled {
 		respJSON, _ := json.MarshalIndent(resp, "", "  ")

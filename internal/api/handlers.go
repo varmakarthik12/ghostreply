@@ -38,10 +38,10 @@ func (a *API) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func (a *API) Mount(r chi.Router) {
-	r.Post("/integrations/{integrationID}/conversations/{externalID}/auto-reply", a.autoReply)
-
 	r.Group(func(r chi.Router) {
 		r.Use(a.AuthMiddleware)
+
+		r.Post("/integrations/{integrationID}/conversations/{externalID}/auto-reply", a.autoReply)
 
 		r.Get("/integrations", a.listIntegrations)
 		r.Post("/integrations", a.createIntegration)

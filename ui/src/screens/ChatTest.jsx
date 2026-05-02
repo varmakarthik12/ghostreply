@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Field from "../components/Field";
 import Spinner from "../components/Spinner";
-import { apiGet } from "../lib/api";
+import { apiGet, getToken } from "../lib/api";
 import { useResource } from "../lib/hooks";
 
 export default function ChatTest() {
@@ -45,6 +45,7 @@ export default function ChatTest() {
     ]);
 
     try {
+      const t = getToken();
       const endpoint = `/api/integrations/${selected.id}/conversations/${chatId}/auto-reply`;
       const body = {
         content: text,
@@ -64,7 +65,7 @@ export default function ChatTest() {
 
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + t },
         body: JSON.stringify(body),
       });
       const data = await res.json();
