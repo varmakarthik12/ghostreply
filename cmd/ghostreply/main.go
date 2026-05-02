@@ -26,7 +26,6 @@ var (
 	port      = flag.String("port", "8080", "Port to listen on")
 	tokenFlag = flag.String("token", "", "Bearer token (auto-generated if empty)")
 	dbPath    = flag.String("db-path", "", "SQLite database file path (default: ~/.ghostreply/ghostreply.db)")
-	llmURL    = flag.String("llm-url", "http://localhost:11434", "LLM base URL (Ollama or any OpenAI-compatible endpoint)")
 )
 
 // defaultDBPath returns ~/.ghostreply/ghostreply.db, creating the directory if needed.
@@ -76,7 +75,7 @@ func main() {
 	}
 	defer store.Close()
 
-	apiHandler := api.NewAPI(store, token, *llmURL, func(baseURL, apiKey string) chat.LLM {
+	apiHandler := api.NewAPI(store, token, store.GetConfigValue("llm_url", "http://localhost:11434"), func(baseURL, apiKey string) chat.LLM {
 		// LLM_KEY env is the generic name; fall back to OPENAI_API_KEY for backward compat.
 		key := apiKey
 		if key == "" {
@@ -100,7 +99,7 @@ func main() {
 			prefix = prefix[:8]
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","token_prefix":"%s","llm_url":"%s","db_ok":%t}`, prefix, *llmURL, dbOK)
+		fmt.Fprintf(w, `{"status":"ok","token_prefix":"%s","llm_url":"%s","db_ok":%t}`, prefix, store.GetConfigValue("llm_url", "http://localhost:11434"), dbOK)
 	})
 
 	r.Route("/api", func(r chi.Router) { apiHandler.Mount(r) })
@@ -116,7 +115,7 @@ func main() {
 	fmt.Printf("Token: %s\n", token)
 	fmt.Printf("Port:  %s\n", *port)
 	fmt.Printf("DB:    %s\n", dbLabel)
-	fmt.Printf("LLM:   %s\n", *llmURL)
+	fmt.Printf("LLM:   %s\n", store.GetConfigValue("llm_url", "http://localhost:11434"))
 	fmt.Printf("Open   http://localhost:%s\n", *port)
 	log.Fatal(http.ListenAndServe(":"+*port, r))
 }

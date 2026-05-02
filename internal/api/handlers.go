@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -39,8 +38,7 @@ func (a *API) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func (a *API) Mount(r chi.Router) {
-	// Webhook is unauthenticated — typically called by a platform proxy.
-	r.Post("/webhook", a.webhook)
+	r.Post("/integrations/{integrationID}/conversations/{externalID}/auto-reply", a.autoReply)
 
 	r.Group(func(r chi.Router) {
 		r.Use(a.AuthMiddleware)
@@ -99,18 +97,20 @@ func decodeBody(r *http.Request, v interface{}) error {
 
 // ----- webhook -----
 
-func (a *API) webhook(w http.ResponseWriter, r *http.Request) {
-	var req chat.WebhookRequest
+func (a *API) autoReply(w http.ResponseWriter, r *http.Request) {
+	integrationID := chi.URLParam(r, "integrationID")
+	externalID := chi.URLParam(r, "externalID")
+
+	var req chat.AutoReplyRequest
 	if err := decodeBody(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	resp, err := a.Engine.HandleWebhook(r.Context(), req)
+	req.IntegrationID = integrationID
+	req.ConversationID = externalID
+
+	resp, err := a.Engine.HandleAutoReply(r.Context(), req)
 	if err != nil {
-		if errors.Is(err, chat.ErrIntegrationNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "integration not found"})
-			return
-		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -222,7 +222,7 @@ func (a *API) createMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if m.DedupHash == "" {
-		m.DedupHash = db.DedupHash(m.ConversationID, m.Content)
+		m.DedupHash = db.DedupHash(m.ConversationID, m.SenderID, m.Content, m.Timestamp)
 	}
 	if err := a.Store.InsertMessage(&m); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})

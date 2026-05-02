@@ -47,6 +47,18 @@ const CONFIG_KEYS = [
     group: "other",
     desc: "Persona hint: brief or detailed",
   },
+  {
+    key: "max_consecutive_assistant_messages",
+    default: "2",
+    group: "other",
+    desc: "Max consecutive assistant replies (0 to disable)",
+  },
+  {
+    key: "debug_auto_reply",
+    default: "false",
+    group: "debug",
+    desc: "Log entire request/response for AutoReply (caution: verbose)",
+  },
 ];
 
 function ConfigForm({ init, onSave, onCancel }) {
@@ -264,6 +276,148 @@ export default function Settings() {
         </button>
       </div>
 
+      {/* Debug Settings */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>🛠️ Debug & Logging</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
+          Enable verbose logging for troubleshooting. This will print the full
+          JSON request and response to the server console.
+        </p>
+        <div className="row" style={{ alignItems: "center" }}>
+          <Field label="Debug AutoReply API" style={{ flex: 1 }}>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                id="debug-toggle"
+                checked={
+                  (s.data || []).find(
+                    (c) => c.scope === "global" && c.key === "debug_auto_reply",
+                  )?.value === "true"
+                }
+                onChange={async (e) => {
+                  const val = e.target.checked ? "true" : "false";
+                  const existing = (s.data || []).find(
+                    (c) => c.scope === "global" && c.key === "debug_auto_reply",
+                  );
+                  try {
+                    if (existing) {
+                      await apiPut("/configs/" + existing.id, {
+                        key: "debug_auto_reply",
+                        value: val,
+                      });
+                    } else {
+                      await apiPost("/configs", {
+                        scope: "global",
+                        scope_id: "",
+                        key: "debug_auto_reply",
+                        value: val,
+                      });
+                    }
+                    toast(
+                      `Debug logging ${e.target.checked ? "enabled" : "disabled"}`,
+                    );
+                    reload();
+                  } catch (err) {
+                    toast(err.message, "error");
+                  }
+                }}
+              />
+              <label
+                htmlFor="debug-toggle"
+                style={{ cursor: "pointer", color: "var(--muted)" }}
+              >
+                Enable verbose console logs
+              </label>
+            </div>
+          </Field>
+        </div>
+      </div>
+
+      {/* Global Config Quick Edit */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>⚙️ Global Configuration</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
+          Quickly edit global defaults. These apply to all integrations unless
+          overridden.
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 16,
+            marginBottom: 16,
+          }}
+        >
+          {CONFIG_KEYS.filter((k) => k.group !== "llm" && k.group !== "debug").map(
+            (k) => {
+              const existing = (s.data || []).find(
+                (c) => c.scope === "global" && c.key === k.key,
+              );
+              return (
+                <Field key={k.key} label={k.desc}>
+                  <div className="row" style={{ gap: 8 }}>
+                    {k.key === "reply_style" ? (
+                      <select
+                        value={existing?.value || k.default}
+                        onChange={async (e) => {
+                          try {
+                            if (existing)
+                              await apiPut("/configs/" + existing.id, {
+                                key: k.key,
+                                value: e.target.value,
+                              });
+                            else
+                              await apiPost("/configs", {
+                                scope: "global",
+                                scope_id: "",
+                                key: k.key,
+                                value: e.target.value,
+                              });
+                            toast(`${k.key} updated`);
+                            reload();
+                          } catch (err) {
+                            toast(err.message, "error");
+                          }
+                        }}
+                      >
+                        <option value="brief">Brief</option>
+                        <option value="detailed">Detailed</option>
+                      </select>
+                    ) : (
+                      <input
+                        defaultValue={existing?.value || k.default}
+                        onBlur={async (e) => {
+                          const val = e.target.value;
+                          if (existing?.value === val) return;
+                          try {
+                            if (existing)
+                              await apiPut("/configs/" + existing.id, {
+                                key: k.key,
+                                value: val,
+                              });
+                            else
+                              await apiPost("/configs", {
+                                scope: "global",
+                                scope_id: "",
+                                key: k.key,
+                                value: val,
+                              });
+                            toast(`${k.key} updated`);
+                            reload();
+                          } catch (err) {
+                            toast(err.message, "error");
+                          }
+                        }}
+                        placeholder={k.default}
+                      />
+                    )}
+                  </div>
+                </Field>
+              );
+            },
+          )}
+        </div>
+      </div>
       {/* Reference table */}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Config Key Reference</h3>

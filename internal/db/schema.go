@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     integration_id TEXT NOT NULL,
     external_id    TEXT NOT NULL,
     title          TEXT,
+    chat_type      TEXT, -- group or individual
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(integration_id, external_id)
 );
@@ -28,6 +29,8 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL,
     is_outbound     INTEGER NOT NULL,
     content         TEXT NOT NULL,
+    sender_id       TEXT,
+    sender_name     TEXT,
     dedup_hash      TEXT UNIQUE,
     timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -45,7 +48,8 @@ CREATE TABLE IF NOT EXISTS configs (
     scope_id TEXT,
     key      TEXT NOT NULL,
     value    TEXT NOT NULL,
-    UNIQUE(scope, key)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(scope, scope_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS model_configs (

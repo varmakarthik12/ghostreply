@@ -8,6 +8,8 @@ export default function ChatTest() {
   const [intS] = useResource(() => apiGet("/integrations"), []);
   const [selInt, setSelInt] = useState("");
   const [chatId, setChatId] = useState("test_user");
+  const [senderName, setSenderName] = useState("Teddy");
+  const [chatType, setChatType] = useState("individual");
   const [msg, setMsg] = useState("");
   const [bubbles, setBubbles] = useState([]);
   const [sending, setSending] = useState(false);
@@ -26,22 +28,41 @@ export default function ChatTest() {
     if (!text || !selected || !chatId.trim()) return;
     setSending(true);
     setMsg("");
+    const now = new Date();
+    const time_iso = now.toISOString();
+    const time_str = now.toLocaleTimeString();
+    const msgId = "test_" + now.getTime();
+
     setBubbles((b) => [
       ...b,
       {
-        id: Date.now(),
+        id: msgId,
         type: "out",
         text,
-        time: new Date().toLocaleTimeString(),
+        time: time_str,
+        time_iso: time_iso,
       },
     ]);
+
     try {
+      const endpoint = `/api/integrations/${selected.id}/conversations/${chatId}/auto-reply`;
       const body = {
-        text,
-        platform: selected.platform,
-        chat_id: chatId.trim(),
+        content: text,
+        sender_id: chatId.trim(),
+        sender_name: senderName.trim(),
+        chat_type: chatType,
+        message_id: msgId,
+        timestamp: time_iso,
+        history: bubbles.map((b) => ({
+          content: b.text,
+          is_outbound: b.type === "in",
+          sender_name: b.type === "in" ? "AI" : senderName,
+          timestamp: b.time_iso || new Date().toISOString(),
+          message_id: b.id.toString(),
+        })),
       };
-      const res = await fetch("/api/webhook", {
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -51,10 +72,11 @@ export default function ChatTest() {
       setBubbles((b) => [
         ...b,
         {
-          id: Date.now() + 1,
+          id: "in_" + Date.now(),
           type: "in",
           text: data.reply,
           time: new Date().toLocaleTimeString(),
+          time_iso: data.timestamp || new Date().toISOString(),
           raw: data,
         },
       ]);
@@ -76,6 +98,10 @@ export default function ChatTest() {
     <div>
       <h2>🧪 Chat Test</h2>
       <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 12 }}>
+          <span className="badge badge-blue">Auto-Reply V2 (Live)</span>
+        </div>
+
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
         >
@@ -89,24 +115,30 @@ export default function ChatTest() {
               ))}
             </select>
           </Field>
-          <Field label="Chat ID (simulated sender)">
+          <Field label="External ID (Conversation ID)">
             <input
               value={chatId}
               onChange={(e) => setChatId(e.target.value)}
-              placeholder="user123"
+              placeholder="user123 or snap-uuid"
             />
+          </Field>
+          <Field label="Sender Name">
+            <input
+              value={senderName}
+              onChange={(e) => setSenderName(e.target.value)}
+              placeholder="Teddy"
+            />
+          </Field>
+          <Field label="Chat Type">
+            <select value={chatType} onChange={(e) => setChatType(e.target.value)}>
+              <option value="individual">Individual</option>
+              <option value="group">Group</option>
+            </select>
           </Field>
         </div>
         {selected && (
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            Payload:{" "}
-            <code>
-              {JSON.stringify({
-                text: "…",
-                platform: selected.platform,
-                chat_id: chatId || "…",
-              })}
-            </code>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
+            Target Endpoint: <code>/api/integrations/{selected.id}/conversations/{chatId}/auto-reply</code>
           </div>
         )}
       </div>

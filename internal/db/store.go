@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,14 +29,111 @@ func NewStore(path string) (*Store, error) {
 	if _, err := d.Exec(Schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
-	return &Store{DB: d}, nil
+	s := &Store{DB: d}
+	if err := s.Migrate(); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := s.Seed(); err != nil {
+		return nil, fmt.Errorf("seed: %w", err)
+	}
+	return s, nil
 }
 
 func (s *Store) Close() error { return s.DB.Close() }
 
-func DedupHash(conversationID, content string) string {
-	h := sha256.Sum256([]byte(conversationID + "|" + content))
+func (s *Store) Migrate() error {
+	// SQLite doesn't support "IF NOT EXISTS" for ADD COLUMN directly in a simple way
+	// We'll just try to add and ignore errors if they already exist,
+	// or check manually. Checking manually is cleaner.
+
+	addColumn := func(table, column, spec string) {
+		_, err := s.DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, spec))
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate column") {
+				return
+			}
+			log.Printf("[DB] Migrate error on %s.%s: %v", table, column, err)
+		} else {
+			log.Printf("[DB] Successfully added column %s to table %s", column, table)
+		}
+	}
+
+	addColumn("conversations", "chat_type", "TEXT")
+	addColumn("messages", "sender_id", "TEXT")
+	addColumn("messages", "sender_name", "TEXT")
+	addColumn("configs", "updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
+
+	// Migration for configs table UNIQUE constraint
+	var configsSchema string
+	s.DB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='configs'").Scan(&configsSchema)
+	if !strings.Contains(configsSchema, "UNIQUE(scope, scope_id, key)") {
+		log.Printf("[DB] Migrating configs table to new UNIQUE constraint...")
+		tx, err := s.DB.Begin()
+		if err == nil {
+			_, _ = tx.Exec("ALTER TABLE configs RENAME TO configs_old")
+			_, _ = tx.Exec(`CREATE TABLE configs (
+				id       TEXT PRIMARY KEY,
+				scope    TEXT NOT NULL,
+				scope_id TEXT,
+				key      TEXT NOT NULL,
+				value    TEXT NOT NULL,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(scope, scope_id, key)
+			)`)
+			_, _ = tx.Exec("INSERT INTO configs (id, scope, scope_id, key, value, updated_at) SELECT id, scope, scope_id, key, value, COALESCE(updated_at, CURRENT_TIMESTAMP) FROM configs_old")
+			_, _ = tx.Exec("DROP TABLE configs_old")
+			if err := tx.Commit(); err != nil {
+				log.Printf("[DB] Failed to migrate configs table: %v", err)
+			} else {
+				log.Printf("[DB] Configs table migration successful")
+			}
+		}
+	}
+
+	return nil
+}
+
+func DedupHash(conversationID, senderID, content, timestamp string) string {
+	normalizedTime := timestamp
+	if timestamp != "" {
+		// Try parsing as RFC3339 (standard ISO format with Z or offset)
+		t, err := time.Parse(time.RFC3339, timestamp)
+		if err != nil {
+			// Try without Z/offset (common in some logs)
+			t, err = time.Parse("2006-01-02T15:04:05", timestamp)
+		}
+		if err == nil {
+			// Round to the second to ignore millisecond jitter
+			normalizedTime = t.Truncate(time.Second).Format(time.RFC3339)
+		}
+	}
+
+	// Use just conversationID, content and normalized timestamp for deduplication
+	data := fmt.Sprintf("%s|%s|%s", conversationID, content, normalizedTime)
+	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])
+}
+
+func (s *Store) Seed() error {
+	defaults := map[string]string{
+		"llm_url":                            "http://localhost:11434",
+		"summary_threshold":                  "50",
+		"token_threshold":                    "4000",
+		"max_context_messages":               "20",
+		"reply_style":                        "brief",
+		"max_consecutive_assistant_messages": "2",
+		"debug_auto_reply":                   "false",
+	}
+
+	for k, v := range defaults {
+		// Use INSERT OR IGNORE to only add if not present
+		_, err := s.DB.Exec(`INSERT OR IGNORE INTO configs (id, scope, scope_id, key, value) VALUES (?, 'global', '', ?, ?)`,
+			uuid.NewString(), k, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ----- types -----
@@ -54,6 +153,7 @@ type Conversation struct {
 	IntegrationID string `json:"integration_id"`
 	ExternalID    string `json:"external_id"`
 	Title         string `json:"title"`
+	ChatType      string `json:"chat_type"`
 	CreatedAt     string `json:"created_at"`
 }
 
@@ -62,6 +162,8 @@ type Message struct {
 	ConversationID string `json:"conversation_id"`
 	IsOutbound     int    `json:"is_outbound"`
 	Content        string `json:"content"`
+	SenderID       string `json:"sender_id"`
+	SenderName     string `json:"sender_name"`
 	DedupHash      string `json:"dedup_hash"`
 	Timestamp      string `json:"timestamp"`
 }
@@ -156,7 +258,7 @@ func (s *Store) GetActiveIntegrationByPlatform(platform string) (*Integration, e
 // ----- Conversations -----
 
 func (s *Store) ListConversations(integrationID string) ([]Conversation, error) {
-	q := `SELECT id, integration_id, external_id, COALESCE(title,''), created_at FROM conversations`
+	q := `SELECT id, integration_id, external_id, COALESCE(title,''), COALESCE(chat_type,''), created_at FROM conversations`
 	args := []interface{}{}
 	if integrationID != "" {
 		q += ` WHERE integration_id=?`
@@ -171,7 +273,7 @@ func (s *Store) ListConversations(integrationID string) ([]Conversation, error) 
 	out := []Conversation{}
 	for rows.Next() {
 		var c Conversation
-		if err := rows.Scan(&c.ID, &c.IntegrationID, &c.ExternalID, &c.Title, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.IntegrationID, &c.ExternalID, &c.Title, &c.ChatType, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -183,25 +285,25 @@ func (s *Store) CreateConversation(c *Conversation) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()
 	}
-	_, err := s.DB.Exec(`INSERT INTO conversations (id, integration_id, external_id, title) VALUES (?,?,?,?)`,
-		c.ID, c.IntegrationID, c.ExternalID, c.Title)
+	_, err := s.DB.Exec(`INSERT INTO conversations (id, integration_id, external_id, title, chat_type) VALUES (?,?,?,?,?)`,
+		c.ID, c.IntegrationID, c.ExternalID, c.Title, c.ChatType)
 	return err
 }
 
 func (s *Store) FindConversationByID(id string) (*Conversation, error) {
-	row := s.DB.QueryRow(`SELECT id, integration_id, external_id, COALESCE(title,''), created_at FROM conversations WHERE id=?`, id)
+	row := s.DB.QueryRow(`SELECT id, integration_id, external_id, COALESCE(title,''), COALESCE(chat_type,''), created_at FROM conversations WHERE id=?`, id)
 	var c Conversation
-	if err := row.Scan(&c.ID, &c.IntegrationID, &c.ExternalID, &c.Title, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.IntegrationID, &c.ExternalID, &c.Title, &c.ChatType, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
 }
 
 func (s *Store) FindConversation(integrationID, externalID string) (*Conversation, error) {
-	row := s.DB.QueryRow(`SELECT id, integration_id, external_id, COALESCE(title,''), created_at FROM conversations WHERE integration_id=? AND external_id=?`,
+	row := s.DB.QueryRow(`SELECT id, integration_id, external_id, COALESCE(title,''), COALESCE(chat_type,''), created_at FROM conversations WHERE integration_id=? AND external_id=?`,
 		integrationID, externalID)
 	var c Conversation
-	if err := row.Scan(&c.ID, &c.IntegrationID, &c.ExternalID, &c.Title, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.IntegrationID, &c.ExternalID, &c.Title, &c.ChatType, &c.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -231,7 +333,7 @@ func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.Query(`SELECT id, conversation_id, is_outbound, content, COALESCE(dedup_hash,''), timestamp FROM messages WHERE conversation_id=? ORDER BY timestamp DESC LIMIT ?`, conversationID, limit)
+	rows, err := s.DB.Query(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE conversation_id=? ORDER BY timestamp DESC LIMIT ?`, conversationID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +341,7 @@ func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.DedupHash, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -273,8 +375,8 @@ func (s *Store) InsertMessage(m *Message) error {
 	if m.Timestamp == "" {
 		m.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.DB.Exec(`INSERT INTO messages (id, conversation_id, is_outbound, content, dedup_hash, timestamp) VALUES (?,?,?,?,?,?)`,
-		m.ID, m.ConversationID, m.IsOutbound, m.Content, nullable(m.DedupHash), m.Timestamp)
+	_, err := s.DB.Exec(`INSERT INTO messages (id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp) VALUES (?,?,?,?,?,?,?,?)`,
+		m.ID, m.ConversationID, m.IsOutbound, m.Content, m.SenderID, m.SenderName, nullable(m.DedupHash), m.Timestamp)
 	return err
 }
 
@@ -282,18 +384,18 @@ func (s *Store) FindMessageByDedup(hash string) (*Message, error) {
 	if hash == "" {
 		return nil, sql.ErrNoRows
 	}
-	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(dedup_hash,''), timestamp FROM messages WHERE dedup_hash=?`, hash)
+	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE dedup_hash=?`, hash)
 	var m Message
-	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.DedupHash, &m.Timestamp); err != nil {
+	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
 		return nil, err
 	}
 	return &m, nil
 }
 
 func (s *Store) LastOutboundMessage(conversationID string) (*Message, error) {
-	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(dedup_hash,''), timestamp FROM messages WHERE conversation_id=? AND is_outbound=1 ORDER BY timestamp DESC LIMIT 1`, conversationID)
+	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE conversation_id=? AND is_outbound=1 ORDER BY timestamp DESC LIMIT 1`, conversationID)
 	var m Message
-	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.DedupHash, &m.Timestamp); err != nil {
+	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
 		return nil, err
 	}
 	return &m, nil
@@ -389,9 +491,13 @@ func (s *Store) ListConfigs(scope, scopeID string) ([]Config, error) {
 			args = append(args, scopeID)
 		}
 	}
-	rows, err := s.DB.Query(q+where+` ORDER BY scope, key`, args...)
+	rows, err := s.DB.Query(q+where+` ORDER BY updated_at DESC`, args...)
 	if err != nil {
-		return nil, err
+		// Fallback if migration hasn't run yet
+		rows, err = s.DB.Query(q+where+` ORDER BY scope, key`, args...)
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer rows.Close()
 	out := []Config{}
@@ -409,14 +515,14 @@ func (s *Store) UpsertConfig(c *Config) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()
 	}
-	_, err := s.DB.Exec(`INSERT INTO configs (id, scope, scope_id, key, value) VALUES (?,?,?,?,?)
-		ON CONFLICT(scope, key) DO UPDATE SET value=excluded.value, scope_id=excluded.scope_id`,
+	_, err := s.DB.Exec(`INSERT INTO configs (id, scope, scope_id, key, value, updated_at) VALUES (?,?,?,?,?, CURRENT_TIMESTAMP)
+		ON CONFLICT(scope, scope_id, key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`,
 		c.ID, c.Scope, nullable(c.ScopeID), c.Key, c.Value)
 	return err
 }
 
 func (s *Store) UpdateConfig(id, key, value string) error {
-	_, err := s.DB.Exec(`UPDATE configs SET key=?, value=? WHERE id=?`, key, value, id)
+	_, err := s.DB.Exec(`UPDATE configs SET key=?, value=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, key, value, id)
 	return err
 }
 
@@ -434,7 +540,32 @@ func (s *Store) GetConfigValue(key string, def string) string {
 	return v
 }
 
-// ----- Model configs -----
+func (s *Store) ResolveConfig(conversationID, integrationID, key, def string) string {
+	scopes := []struct {
+		scope    string
+		scope_id string
+	}{
+		{"conversation", conversationID},
+		{"integration", integrationID},
+		{"global", ""},
+	}
+	for _, sc := range scopes {
+		if sc.scope != "global" && sc.scope_id == "" {
+			continue
+		}
+		var v string
+		var err error
+		if sc.scope == "global" {
+			err = s.DB.QueryRow(`SELECT value FROM configs WHERE scope='global' AND key=?`, key).Scan(&v)
+		} else {
+			err = s.DB.QueryRow(`SELECT value FROM configs WHERE scope=? AND scope_id=? AND key=?`, sc.scope, sc.scope_id, key).Scan(&v)
+		}
+		if err == nil && v != "" {
+			return v
+		}
+	}
+	return def
+}
 
 func (s *Store) ListModelConfigs() ([]ModelConfig, error) {
 	rows, err := s.DB.Query(`SELECT id, scope, COALESCE(scope_id,''), value FROM model_configs ORDER BY scope`)
