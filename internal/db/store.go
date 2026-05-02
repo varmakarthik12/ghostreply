@@ -93,7 +93,7 @@ func (s *Store) Migrate() error {
 	return nil
 }
 
-func DedupHash(conversationID, senderID, content, timestamp string) string {
+func DedupHash(conversationID, messageID, content, timestamp string) string {
 	normalizedTime := timestamp
 	if timestamp != "" {
 		// Try parsing as RFC3339 (standard ISO format with Z or offset)
@@ -109,7 +109,7 @@ func DedupHash(conversationID, senderID, content, timestamp string) string {
 	}
 
 	// Use just conversationID, content and normalized timestamp for deduplication
-	data := fmt.Sprintf("%s|%s|%s", conversationID, content, normalizedTime)
+	data := fmt.Sprintf("%s|%s|%s|%s", conversationID, content, normalizedTime, messageID)
 	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])
 }

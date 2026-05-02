@@ -134,7 +134,10 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		if hashKey == "" {
 			hashKey = hm.Timestamp
 		}
-		hash := db.DedupHash(conv.ID, hm.SenderID, hm.Content, hashKey)
+		if hm.Content == "" {
+			continue
+		}
+		hash := db.DedupHash(conv.ID, hm.MessageID, hm.Content, hashKey)
 		if existing, _ := e.Store.FindMessageByDedup(hash); existing != nil {
 			if debugEnabled {
 				log.Printf("[DEBUG] Skipping history message (duplicate): %s", hm.Content)
@@ -161,24 +164,23 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	if hashKey == "" {
 		hashKey = req.Timestamp
 	}
-	hash := db.DedupHash(conv.ID, req.SenderID, req.Content, hashKey)
+	hash := db.DedupHash(conv.ID, req.MessageID, req.Content, hashKey)
 	if existing, err := e.Store.FindMessageByDedup(hash); err == nil && existing != nil {
-		if last, err := e.Store.LastOutboundMessage(conv.ID); err == nil && last != nil {
-			return &WebhookResponse{Reply: last.Content}, nil
+		if debugEnabled {
+			log.Printf("[DEBUG] Skipping incoming message (already processed): %s", req.Content)
 		}
-		return &WebhookResponse{Reply: ""}, nil
-	}
-
-	if err := e.Store.InsertMessage(&db.Message{
-		ConversationID: conv.ID,
-		IsOutbound:     0,
-		Content:        req.Content,
-		SenderID:       req.SenderID,
-		SenderName:     req.SenderName,
-		DedupHash:      hash,
-		Timestamp:      req.Timestamp,
-	}); err != nil {
-		return nil, fmt.Errorf("insert incoming: %w", err)
+	} else {
+		if err := e.Store.InsertMessage(&db.Message{
+			ConversationID: conv.ID,
+			IsOutbound:     0,
+			Content:        req.Content,
+			SenderID:       req.SenderID,
+			SenderName:     req.SenderName,
+			DedupHash:      hash,
+			Timestamp:      req.Timestamp,
+		}); err != nil {
+			return nil, fmt.Errorf("insert incoming: %w", err)
+		}
 	}
 
 	// 4. Generate Reply (reuse logic)
@@ -195,24 +197,39 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
 	model := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
 
+	style := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "reply_style", "brief")
+
 	system := persona
 	if system != "" {
 		system += "\n\n"
 	}
-	system += "You are responding on behalf of the host user.\nBe natural, casual, match their tone."
+
 	if conv.ChatType != "" {
-		system += fmt.Sprintf("\nThis is a %s chat.", conv.ChatType)
-	}
-	if summaryText != "" {
-		system += "\n\nContext summary:\n" + summaryText
+		system += fmt.Sprintf("You are in a %s chat. Stay fully in character — never break the persona.\n", conv.ChatType)
 	}
 
-	style := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "reply_style", "brief")
-	if style == "detailed" {
-		system += "\nProvide detailed, comprehensive responses."
-	} else {
-		system += "\nKeep your responses brief and concise."
+	if summaryText != "" {
+		system += `## Memory — read this carefully before every reply
+This is a structured memory of the conversation so far. Use each section as follows:
+
+- **My speaking style** → Write exactly like this. Copy the rhythm, vocabulary, and quirks described.
+- **Relationship dynamic** → Match the emotional tone between us. Keep that same energy.
+- **What they've shared** → Remember this. Bring it up naturally when relevant — don't ignore it.
+- **What I've shared** → Stay consistent. Never contradict your own past self.
+- **Recent conversation thread** → This is the emotional direction we were heading. Continue it.
+- **Active topics / follow-ups** → These are your priority. Pick up open threads naturally.
+
+` + summaryText + "\n\n"
 	}
+
+	if style == "detailed" {
+		system += "Go deeper when it feels natural — share more, ask follow-ups, be emotionally present."
+	} else {
+		system += "Reply the way a real person texts — short, natural, sometimes incomplete sentences. Never write a wall of text. 1 to 3 sentences max unless the moment calls for more."
+	}
+
+	// Keep the conversation on track
+	system += "\n\nFollow the conversation naturally. Pick up on what was last said. If you shift topics, make it feel organic — like a real person who got distracted, not a bot trying to escape a question."
 
 	msgs := []llm.Message{{Role: "system", Content: system}}
 	for _, m := range recent {
@@ -229,8 +246,13 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	baseURL := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_url", e.LLMURL)
 	apiKey := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_key", "")
 	client := e.NewLLM(baseURL, apiKey)
+	if debugEnabled {
+		log.Printf("[DEBUG] LLM Model: %s", model)
+		log.Printf("[DEBUG] LLM Messages: %v", msgs)
+	}
 	reply, err := client.Chat(ctx, model, msgs)
 	if err != nil {
+		log.Printf("[ERROR] LLM Chat failed: %v", err)
 		return nil, fmt.Errorf("llm: %w", err)
 	}
 

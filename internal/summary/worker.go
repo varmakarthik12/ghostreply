@@ -109,28 +109,52 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 
 	var body string
 	for _, m := range msgs {
-		role := "user"
+		label := "them"
 		if m.IsOutbound == 1 {
-			role = "assistant"
+			label = "me"
 		}
-		body += fmt.Sprintf("%s: %s\n", role, m.Content)
+		if m.SenderName != "" && m.IsOutbound == 0 {
+			label = m.SenderName
+		}
+		body += fmt.Sprintf("%s: %s\n", label, m.Content)
 	}
 
-	prompt := "Summarize the following conversation history in 3-5 sentences, capturing key topics, tone, and important details."
+	prompt := `You are building a memory summary that will be injected into a chat AI's system prompt to help it reply naturally as a specific person.
+
+Your job is NOT to write a story recap. Instead, produce a structured summary that the AI can use to:
+1. Sound exactly like the same person who wrote the previous messages
+2. Remember what the other person shared and bring it up naturally
+3. Continue the emotional tone and relationship dynamic
+
+Format your summary like this:
+
+**My speaking style:** [Describe how "me" texts — sentence length, vocabulary, use of humor, level of formality, any recurring phrases or quirks]
+
+**Relationship dynamic:** [How do we talk to each other? Flirty, friendly, playful, guarded, warm? What's the vibe?]
+
+**What they've shared about themselves:** [List any personal details, feelings, stories or facts the other person mentioned]
+
+**What I've shared about myself:** [List any personal details, feelings, or stories I mentioned — be vague if nothing concrete was said]
+
+**Recent conversation thread:** [2-3 sentence description of what we were just talking about and the emotional direction of the conversation]
+
+**Active topics / things to follow up on:** [Anything left open, questions that weren't answered, things that felt important]`
+
 	if prevContext != "" {
-		prompt += "\n\nCumulative context from previous summaries:\n" + prevContext
+		prompt += "\n\n---\nPrevious memory (keep this, update it with new info):\n" + prevContext
 	}
-	prompt += "\n\nNew messages to incorporate:\n" + body
+	prompt += "\n\n---\nNew messages to incorporate:\n" + body
 
 	model := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
 	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
 	apiKey := w.Store.GetConfigValue("llm_key", "")
 	client := w.Engine.NewLLM(baseURL, apiKey)
 	reply, err := client.Chat(ctx, model, []llm.Message{
-		{Role: "system", Content: "You are a precise conversation summarizer. Always produce a single self-contained summary that includes all historical context."},
+		{Role: "system", Content: "You are a conversation memory writer. Your output will be injected directly into a chat AI's system prompt to help it impersonate a real person accurately. Be specific, structured, and useful — not generic. Preserve all prior memory and update it with new information."},
 		{Role: "user", Content: prompt},
 	})
 	if err != nil {
+		log.Printf("[ERROR] Summarization failed for conversation %s: %v", conversationID, err)
 		return err
 	}
 
