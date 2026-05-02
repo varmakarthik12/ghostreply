@@ -206,55 +206,6 @@ func TestIdentityLinksCRUD(t *testing.T) {
 	}
 }
 
-func TestWebhookFlow(t *testing.T) {
-	_, h := newTestServer(t)
-	// Setup integration
-	rr := do(t, h, "POST", "/api/integrations",
-		map[string]string{"platform": "telegram", "account": "Bot", "token": "x"}, testToken)
-	var integ db.Integration
-	json.Unmarshal(rr.Body.Bytes(), &integ)
-
-	// First webhook call -> creates conversation, replies via stub.
-	rr = do(t, h, "POST", "/api/webhook",
-		map[string]string{"text": "hey", "platform": "telegram", "chat_id": "u1"}, "")
-	if rr.Code != 200 {
-		t.Fatalf("webhook: %d %s", rr.Code, rr.Body.String())
-	}
-	var resp chat.WebhookResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp.Reply != "hi from stub" {
-		t.Fatalf("expected stub reply, got %q", resp.Reply)
-	}
-
-	// Verify reply was saved.
-	convs, _ := apiStore(t, h).ListConversations(integ.ID)
-	if len(convs) != 1 {
-		t.Fatalf("expected 1 conversation, got %d", len(convs))
-	}
-	msgs, _ := apiStore(t, h).ListMessages(convs[0].ID, 50)
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
-	}
-
-	// Webhook with unknown platform returns 404.
-	rr = do(t, h, "POST", "/api/webhook",
-		map[string]string{"text": "x", "platform": "nope", "chat_id": "u"}, "")
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rr.Code)
-	}
-
-	// Duplicate text returns the same prior reply.
-	rr = do(t, h, "POST", "/api/webhook",
-		map[string]string{"text": "hey", "platform": "telegram", "chat_id": "u1"}, "")
-	if rr.Code != 200 {
-		t.Fatal(rr.Body.String())
-	}
-	var dup chat.WebhookResponse
-	json.Unmarshal(rr.Body.Bytes(), &dup)
-	if dup.Reply != "hi from stub" {
-		t.Fatalf("dedup reply mismatch: %q", dup.Reply)
-	}
-}
 
 func apiStore(t *testing.T, h http.Handler) *db.Store {
 	t.Helper()

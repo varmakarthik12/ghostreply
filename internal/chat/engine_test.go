@@ -37,8 +37,9 @@ func TestDeduplication(t *testing.T) {
 		SenderID:       "user1",
 		SenderName:     "User 1",
 		Timestamp:      "2026-05-02T19:00:00Z",
+		MessageID:      "msg123",
 		History: []HistoryMessage{
-			{Content: "prev", SenderID: "user1", Timestamp: "2026-05-02T18:59:00Z"},
+			{Content: "prev", SenderID: "user1", Timestamp: "2026-05-02T18:59:00Z", MessageID: "msg000"},
 		},
 	}
 
@@ -52,7 +53,8 @@ func TestDeduplication(t *testing.T) {
 	// Wait, the engine inserts history, then current, then generates reply.
 	// Actually, the reply is inserted too.
 	// But let's check the messages count.
-	msgs, _ := store.ListMessages("conv1", 10)
+	conv, _ := store.FindConversation("int1", "conv1")
+	msgs, _ := store.ListMessages(conv.ID, 10)
 	if len(msgs) < 2 {
 		t.Errorf("expected at least 2 messages, got %d", len(msgs))
 	}
@@ -63,7 +65,7 @@ func TestDeduplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msgs2, _ := store.ListMessages("conv1", 10)
+	msgs2, _ := store.ListMessages(conv.ID, 10)
 	// Should not have increased (except maybe for the reply if LLM generates it again, but it should be deduped too)
 	// Wait, the outbound reply hash is based on content. If LLM is same, it dedupes.
 
@@ -86,7 +88,7 @@ func TestDeduplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msgs3, _ := store.ListMessages("conv1", 10)
+	msgs3, _ := store.ListMessages(conv.ID, 10)
 	hiCount = 0
 	for _, m := range msgs3 {
 		if m.Content == "hi" {
@@ -113,7 +115,7 @@ func TestDeduplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msgs4, _ := store.ListMessages("conv1", 10)
+	msgs4, _ := store.ListMessages(conv.ID, 10)
 	hiCount = 0
 	for _, m := range msgs4 {
 		if m.Content == "hi" {
@@ -144,7 +146,7 @@ func TestDeduplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msgs5, _ := store.ListMessages("conv1", 10)
+	msgs5, _ := store.ListMessages(conv.ID, 10)
 	fuzzyCount := 0
 	for _, m := range msgs5 {
 		if m.Content == "fuzzy" {
