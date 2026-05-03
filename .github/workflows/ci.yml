@@ -5,12 +5,85 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  release:
+    types: [published, created]
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      is_push: ${{ steps.resolve.outputs.is_push }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve Tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            echo "is_push=false" >> $GITHUB_OUTPUT
+          else
+            git fetch --tags
+            LATEST_TAG=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+            if [ -z "$LATEST_TAG" ]; then
+              LATEST_TAG="v0.0.0"
+            fi
+            VERSION=${LATEST_TAG#v}
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            MAJOR=${MAJOR:-0}
+            MINOR=${MINOR:-0}
+            PATCH=${PATCH:-0}
+            NEW_PATCH=$((PATCH + 1))
+            NEW_TAG="v$MAJOR.$MINOR.$NEW_PATCH"
+            echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+            echo "is_push=true" >> $GITHUB_OUTPUT
+            
+            # Push tag now if it's a push event
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag $NEW_TAG
+            git push origin $NEW_TAG
+          fi
+
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build UI
+        run: cd ui && npm ci && npm run build
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc
+      - name: Download Go modules
+        run: go mod download
+      - name: Build
+        run: CGO_ENABLED=1 go build -v ./cmd/ghostreply
+      - name: Test
+        run: CGO_ENABLED=1 go test -v ./... -coverprofile=coverage.out
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+
+  release:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -25,19 +98,13 @@ jobs:
       - name: Build UI
         run: cd ui && npm ci && npm run build
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc
-
-      - name: Download Go modules
-        run: go mod download
-
-      - name: Build
-        run: CGO_ENABLED=1 go build -v ./cmd/ghostreply
-
-      - name: Test
-        run: CGO_ENABLED=1 go test -v ./... -coverprofile=coverage.out
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
-          files: ./coverage.out
+          distribution: goreleaser
+          version: "~> v2"
+          # On push, create draft. On release, just release (upload to existing).
+          args: release --clean ${{ needs.setup.outputs.is_push == 'true' && '--draft' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ needs.setup.outputs.tag }}
