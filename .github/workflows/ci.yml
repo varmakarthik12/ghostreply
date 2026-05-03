@@ -43,7 +43,6 @@ jobs:
           files: ./coverage.out
 
   tag:
-    needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -71,9 +70,9 @@ jobs:
           MINOR=${MINOR:-0}
           PATCH=${PATCH:-0}
           
-          # Increment minor, reset patch
-          NEW_MINOR=$((MINOR + 1))
-          NEW_TAG="v$MAJOR.$NEW_MINOR.0"
+          # Increment patch
+          NEW_PATCH=$((PATCH + 1))
+          NEW_TAG="v$MAJOR.$MINOR.$NEW_PATCH"
           
           echo "New tag: $NEW_TAG"
           
