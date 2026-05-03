@@ -178,11 +178,15 @@ func estimateTokensFor(store *db.Store, conversationID string, count int) int {
 	if err != nil {
 		return 0
 	}
-	total := 0
-	for _, m := range msgs {
-		total += len(m.Content) / 4
+	llmMsgs := make([]llm.Message, len(msgs))
+	for i, m := range msgs {
+		role := "user"
+		if m.IsOutbound == 1 {
+			role = "assistant"
+		}
+		llmMsgs[i] = llm.Message{Role: role, Content: m.Content}
 	}
-	return total
+	return llm.EstimateTokens(llmMsgs)
 }
 
 func atoi(s string, def int) int {

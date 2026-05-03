@@ -40,6 +40,15 @@ export default function App() {
       .then((r) => r.json())
       .then((h) => setTokenPrefix(h.token_prefix || ""))
       .catch(() => {});
+
+    // Router
+    const handlePopState = () => {
+      const path = window.location.pathname.replace(/^\//, "") || "dashboard";
+      setScreen(path);
+    };
+    window.addEventListener("popstate", handlePopState);
+    handlePopState();
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   function handleConnect() {
@@ -56,6 +65,10 @@ export default function App() {
   }
 
   function navigate(id) {
+    const path = id === "dashboard" ? "/" : "/" + id;
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path);
+    }
     setScreen(id);
     setIsSidebarOpen(false); // Close sidebar on navigate (mobile)
     if (id !== "messages") setViewMsgConv(null);
@@ -63,6 +76,9 @@ export default function App() {
 
   function viewMessages(conv) {
     setViewMsgConv(conv);
+    if (window.location.pathname !== "/messages") {
+      window.history.pushState(null, "", "/messages");
+    }
     setScreen("messages");
     setIsSidebarOpen(false);
   }

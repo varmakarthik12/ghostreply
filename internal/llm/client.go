@@ -47,6 +47,16 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message) (string
 	return c.chatOllama(ctx, model, msgs)
 }
 
+// EstimateTokens provides a rough estimate of token count for a list of messages.
+func EstimateTokens(msgs []Message) int {
+	t := 0
+	for _, m := range msgs {
+		// Heuristic: 4 characters per token + some overhead for role/formatting
+		t += (len(m.Content) + len(m.Role) + 12) / 4
+	}
+	return t
+}
+
 func (c *Client) useOpenAI() bool {
 	return c.APIKey != "" || strings.Contains(c.BaseURL, "/v1") || strings.Contains(c.BaseURL, "openai")
 }
@@ -62,14 +72,15 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (
 		return "", Stats{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	stats := Stats{PromptTokens: EstimateTokens(msgs)}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return "", Stats{}, err
+		return "", stats, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return "", Stats{}, fmt.Errorf("ollama %d: %s", resp.StatusCode, string(raw))
+		return "", stats, fmt.Errorf("ollama %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
 		Message          Message `json:"message"`
@@ -77,9 +88,9 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (
 		EvalCount        int     `json:"eval_count"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", Stats{}, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
+		return "", stats, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
 	}
-	stats := Stats{
+	stats = Stats{
 		PromptTokens:     out.PromptEvalCount,
 		CompletionTokens: out.EvalCount,
 		TotalTokens:      out.PromptEvalCount + out.EvalCount,
@@ -107,14 +118,15 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (
 	if c.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
+	stats := Stats{PromptTokens: EstimateTokens(msgs)}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return "", Stats{}, err
+		return "", stats, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return "", Stats{}, fmt.Errorf("openai %d: %s", resp.StatusCode, string(raw))
+		return "", stats, fmt.Errorf("openai %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
 		Choices []struct {
@@ -127,12 +139,12 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", Stats{}, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
+		return "", stats, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
 	}
 	if len(out.Choices) == 0 {
-		return "", Stats{}, fmt.Errorf("no choices returned")
+		return "", stats, fmt.Errorf("no choices returned")
 	}
-	stats := Stats{
+	stats = Stats{
 		PromptTokens:     out.Usage.PromptTokens,
 		CompletionTokens: out.Usage.CompletionTokens,
 		TotalTokens:      out.Usage.TotalTokens,

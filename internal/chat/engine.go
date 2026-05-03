@@ -105,27 +105,6 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		_ = e.Store.CreateConversation(conv)
 	}
 
-	// 3. Spam Prevention: Check consecutive assistant messages
-	maxConsecutive := atoiDefault(e.Store.ResolveConfig(conv.ID, req.IntegrationID, "max_consecutive_assistant_messages", "0"), 0)
-	if maxConsecutive > 0 {
-		recentForSpam, _ := e.Store.RecentMessages(conv.ID, maxConsecutive)
-		allAssistant := true
-		if len(recentForSpam) < maxConsecutive {
-			allAssistant = false
-		} else {
-			for _, m := range recentForSpam {
-				if m.IsOutbound == 0 {
-					allAssistant = false
-					break
-				}
-			}
-		}
-		if allAssistant {
-			log.Printf("[DEBUG] Skipping auto-reply: maximum consecutive assistant messages reached (%d)", maxConsecutive)
-			return &WebhookResponse{Reply: ""}, nil
-		}
-	}
-
 	// 4. Sync History if provided
 	for _, hm := range req.History {
 		isOutbound := 0
@@ -182,6 +161,29 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 			Timestamp:      req.Timestamp,
 		}); err != nil {
 			return nil, fmt.Errorf("insert incoming: %w", err)
+		}
+	}
+
+	// 5. Spam Prevention: Check consecutive assistant messages
+	maxConsecutive := atoiDefault(e.Store.ResolveConfig(conv.ID, req.IntegrationID, "max_consecutive_assistant_messages", "0"), 0)
+	if maxConsecutive > 0 {
+		recentForSpam, _ := e.Store.RecentMessages(conv.ID, maxConsecutive)
+		allAssistant := true
+		if len(recentForSpam) < maxConsecutive {
+			allAssistant = false
+		} else {
+			for _, m := range recentForSpam {
+				if m.IsOutbound == 0 {
+					allAssistant = false
+					break
+				}
+			}
+		}
+		if allAssistant {
+			if debugEnabled {
+				log.Printf("[DEBUG] Skipping auto-reply: maximum consecutive assistant messages reached (%d)", maxConsecutive)
+			}
+			return &WebhookResponse{Reply: ""}, nil
 		}
 	}
 
@@ -259,30 +261,30 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	apiKey := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_key", "")
 	client := e.NewLLM(baseURL, apiKey)
 	if debugEnabled {
-		log.Printf("[DEBUG] LLM Model: %s", modelName)
-		log.Printf("[DEBUG] LLM Messages: %v", msgs)
+		log.Printf("[DEBUG] ConversationId=%s, LLM Model: %s", req.ConversationID, modelName)
+		log.Printf("[DEBUG] ConversationId=%s, LLM Messages: %v", req.ConversationID, msgs)
 	}
 
 	reply, stats, err := client.Chat(ctx, modelName, msgs)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			log.Printf("[ERROR] LLM Chat canceled for conv %s", req.ConversationID)
-			log.Printf("[ERROR] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+			log.Printf("[ERROR] LLM Chat canceled for conversation %s and sender %s", req.ConversationID, req.SenderName)
+			log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 
 		} else if errors.Is(err, context.DeadlineExceeded) {
-			log.Printf("[ERROR] LLM Chat timed out for conv %s", req.ConversationID)
-			log.Printf("[ERROR] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+			log.Printf("[ERROR] LLM Chat timed out for conversation %s and sender %s", req.ConversationID, req.SenderName)
+			log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 
 		} else {
-			log.Printf("[ERROR] LLM Chat failed: %v", err)
-			log.Printf("[ERROR] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+			log.Printf("[ERROR] LLM Chat failed for conversation %s and sender %s: %v", req.ConversationID, req.SenderName, err)
+			log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 
 		}
 		return nil, fmt.Errorf("llm: %w", err)
 	}
 
 	if debugEnabled {
-		log.Printf("[DEBUG] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+		log.Printf("[DEBUG] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 	}
 
 	resp := &WebhookResponse{Reply: reply}
