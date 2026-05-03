@@ -123,6 +123,7 @@ func (s *Store) Seed() error {
 		"reply_style":                        "brief",
 		"max_consecutive_assistant_messages": "2",
 		"debug_auto_reply":                   "false",
+		"summary_model":                      "",
 	}
 
 	for k, v := range defaults {

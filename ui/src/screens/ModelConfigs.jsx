@@ -26,10 +26,14 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
     try {
       const parsed = JSON.parse(val);
       if (parsed && typeof parsed === "object" && parsed.model) {
-        return { model: parsed.model, request_delay: parsed.request_delay || 0 };
+        return {
+          model: parsed.model,
+          request_delay: parsed.request_delay || 0,
+          summary_model: parsed.summary_model || "",
+        };
       }
     } catch (e) {}
-    return { model: val || "", request_delay: 0 };
+    return { model: val || "", request_delay: 0, summary_model: "" };
   };
 
   const initialValues = parseValue(init?.value);
@@ -39,6 +43,7 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
     scope_id: "",
     model: initialValues.model,
     request_delay: initialValues.request_delay,
+    summary_model: initialValues.summary_model,
     ...init,
   });
   const [saving, setSaving] = useState(false);
@@ -57,11 +62,13 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
         value: JSON.stringify({
           model: f.model,
           request_delay: parseInt(f.request_delay) || 0,
+          summary_model: f.summary_model || "",
         }),
       };
       // Remove local UI fields from DB payload
       delete payload.model;
       delete payload.request_delay;
+      delete payload.summary_model;
 
       if (init?.id) await apiPut("/model-configs/" + init.id, payload);
       else await apiPost("/model-configs", payload);
@@ -131,6 +138,18 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
             <option key={m} value={m} />
           ))}
         </datalist>
+      </Field>
+      <Field label="Summary Model">
+        <input
+          list="model-list"
+          value={f.summary_model}
+          onChange={(e) => setF({ ...f, summary_model: e.target.value })}
+          placeholder="Mistral (fallback to main model if empty)"
+        />
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Optional: Use a different model for background summarization to save
+          costs or time.
+        </div>
       </Field>
       <Field label="Request Delay (seconds)">
         <input
@@ -222,6 +241,17 @@ export default function ModelConfigs() {
                             }}
                           >
                             ⏱️ {p.request_delay}s delay
+                          </div>
+                        )}
+                        {p.summary_model && (
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "var(--muted)",
+                              marginTop: 2,
+                            }}
+                          >
+                            📝 Summary: <code>{p.summary_model}</code>
                           </div>
                         )}
                       </div>

@@ -16,6 +16,12 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+type Stats struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // Client speaks to either an Ollama server (POST /api/chat) or any OpenAI-compatible
 // endpoint (POST /v1/chat/completions).
 type Client struct {
@@ -34,7 +40,7 @@ func NewClient(baseURL, apiKey string) *Client {
 
 // Chat sends messages to the model and returns the assistant reply.
 // Auto-detects Ollama vs OpenAI-compatible based on whether BaseURL contains "v1" or APIKey is set.
-func (c *Client) Chat(ctx context.Context, model string, msgs []Message) (string, error) {
+func (c *Client) Chat(ctx context.Context, model string, msgs []Message) (string, Stats, error) {
 	if c.useOpenAI() {
 		return c.chatOpenAI(ctx, model, msgs)
 	}
@@ -45,7 +51,7 @@ func (c *Client) useOpenAI() bool {
 	return c.APIKey != "" || strings.Contains(c.BaseURL, "/v1") || strings.Contains(c.BaseURL, "openai")
 }
 
-func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (string, error) {
+func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (string, Stats, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":    model,
 		"messages": msgs,
@@ -53,28 +59,35 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", Stats{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return "", err
+		return "", Stats{}, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ollama %d: %s", resp.StatusCode, string(raw))
+		return "", Stats{}, fmt.Errorf("ollama %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
-		Message Message `json:"message"`
+		Message          Message `json:"message"`
+		PromptEvalCount  int     `json:"prompt_eval_count"`
+		EvalCount        int     `json:"eval_count"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("decode: %w (body=%s)", err, string(raw))
+		return "", Stats{}, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
 	}
-	return strings.TrimSpace(out.Message.Content), nil
+	stats := Stats{
+		PromptTokens:     out.PromptEvalCount,
+		CompletionTokens: out.EvalCount,
+		TotalTokens:      out.PromptEvalCount + out.EvalCount,
+	}
+	return strings.TrimSpace(out.Message.Content), stats, nil
 }
 
-func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (string, error) {
+func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (string, Stats, error) {
 	url := c.BaseURL
 	if !strings.Contains(url, "/chat/completions") {
 		if !strings.Contains(url, "/v1") {
@@ -88,7 +101,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", Stats{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.APIKey != "" {
@@ -96,23 +109,33 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return "", err
+		return "", Stats{}, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("openai %d: %s", resp.StatusCode, string(raw))
+		return "", Stats{}, fmt.Errorf("openai %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
 		Choices []struct {
 			Message Message `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("decode: %w (body=%s)", err, string(raw))
+		return "", Stats{}, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("no choices returned")
+		return "", Stats{}, fmt.Errorf("no choices returned")
 	}
-	return strings.TrimSpace(out.Choices[0].Message.Content), nil
+	stats := Stats{
+		PromptTokens:     out.Usage.PromptTokens,
+		CompletionTokens: out.Usage.CompletionTokens,
+		TotalTokens:      out.Usage.TotalTokens,
+	}
+	return strings.TrimSpace(out.Choices[0].Message.Content), stats, nil
 }
