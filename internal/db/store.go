@@ -20,12 +20,15 @@ type Store struct {
 func NewStore(path string) (*Store, error) {
 	dsn := path
 	if path != ":memory:" {
-		dsn = path + "?_pragma=foreign_keys(1)"
+		// Use pragma via DSN for modernc.org/sqlite
+		// WAL mode for concurrency, busy_timeout to avoid lock errors
+		dsn = path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(50000)&_pragma=synchronous(NORMAL)"
 	}
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+
 	if _, err := d.Exec(Schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
@@ -332,9 +335,9 @@ func (s *Store) DeleteConversation(id string) error {
 
 func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = -1
 	}
-	// Use ROW_NUMBER() to deduplicate by conversation_id, direction (is_outbound), content, and timestamp.
+	// Use ROW_NUMBER() to deduplicate.
 	// This handles cases where duplicates might exist due to race conditions or sync issues.
 	q := `
 		SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp

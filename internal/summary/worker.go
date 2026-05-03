@@ -80,11 +80,12 @@ func (w *Worker) SummarizeIfNeeded(ctx context.Context, conversationID string, m
 // then deletes all summarized messages and all old summaries, leaving
 // exactly one up-to-date summary.
 func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
+	maxPreviousSummaries := 5
 	conv, err := w.Store.FindConversationByID(conversationID)
 	if err != nil {
 		return err
 	}
-	msgs, err := w.Store.RecentMessages(conversationID, 1000)
+	msgs, err := w.Store.RecentMessages(conversationID, 0)
 	if err != nil {
 		return err
 	}
@@ -104,6 +105,9 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 			prevContext = sm.Text
 		} else {
 			prevContext += "\n" + sm.Text
+		}
+		if i >= maxPreviousSummaries-1 {
+			break
 		}
 	}
 
