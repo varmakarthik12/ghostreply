@@ -40,11 +40,11 @@ func NewClient(baseURL, apiKey string) *Client {
 
 // Chat sends messages to the model and returns the assistant reply.
 // Auto-detects Ollama vs OpenAI-compatible based on whether BaseURL contains "v1" or APIKey is set.
-func (c *Client) Chat(ctx context.Context, model string, msgs []Message) (string, Stats, error) {
+func (c *Client) Chat(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
 	if c.useOpenAI() {
-		return c.chatOpenAI(ctx, model, msgs)
+		return c.chatOpenAI(ctx, model, msgs, contextSize)
 	}
-	return c.chatOllama(ctx, model, msgs)
+	return c.chatOllama(ctx, model, msgs, contextSize)
 }
 
 // EstimateTokens provides a rough estimate of token count for a list of messages.
@@ -61,12 +61,18 @@ func (c *Client) useOpenAI() bool {
 	return c.APIKey != "" || strings.Contains(c.BaseURL, "/v1") || strings.Contains(c.BaseURL, "openai")
 }
 
-func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (string, Stats, error) {
-	body, _ := json.Marshal(map[string]interface{}{
+func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
+	payload := map[string]interface{}{
 		"model":    model,
 		"messages": msgs,
 		"stream":   false,
-	})
+	}
+	if contextSize > 0 {
+		payload["options"] = map[string]interface{}{
+			"num_ctx": contextSize,
+		}
+	}
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewReader(body))
 	if err != nil {
 		return "", Stats{}, err
@@ -98,7 +104,7 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message) (
 	return strings.TrimSpace(out.Message.Content), stats, nil
 }
 
-func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message) (string, Stats, error) {
+func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
 	url := c.BaseURL
 	if !strings.Contains(url, "/chat/completions") {
 		if !strings.Contains(url, "/v1") {

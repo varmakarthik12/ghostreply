@@ -30,10 +30,11 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
           model: parsed.model,
           request_delay: parsed.request_delay || 0,
           summary_model: parsed.summary_model || "",
+          context_size: parsed.context_size || 30000,
         };
       }
     } catch (e) {}
-    return { model: val || "", request_delay: 0, summary_model: "" };
+    return { model: val || "", request_delay: 0, summary_model: "", context_size: 30000 };
   };
 
   const initialValues = parseValue(init?.value);
@@ -44,6 +45,7 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
     model: initialValues.model,
     request_delay: initialValues.request_delay,
     summary_model: initialValues.summary_model,
+    context_size: initialValues.context_size,
     ...init,
   });
   const [saving, setSaving] = useState(false);
@@ -63,12 +65,14 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
           model: f.model,
           request_delay: parseInt(f.request_delay) || 0,
           summary_model: f.summary_model || "",
+          context_size: parseInt(f.context_size) || 30000,
         }),
       };
       // Remove local UI fields from DB payload
       delete payload.model;
       delete payload.request_delay;
       delete payload.summary_model;
+      delete payload.context_size;
 
       if (init?.id) await apiPut("/model-configs/" + init.id, payload);
       else await apiPost("/model-configs", payload);
@@ -164,6 +168,18 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
           it.
         </div>
       </Field>
+      <Field label="Context Window (tokens)">
+        <input
+          type="number"
+          min="0"
+          value={f.context_size}
+          onChange={(e) => setF({ ...f, context_size: e.target.value })}
+          placeholder="30000"
+        />
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Maximum context window size (Ollama: <code>num_ctx</code>). Default: 30,000.
+        </div>
+      </Field>
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
         Inheritance: conversation → integration → global → default (llama3.2)
       </div>
@@ -254,6 +270,15 @@ export default function ModelConfigs() {
                             📝 Summary: <code>{p.summary_model}</code>
                           </div>
                         )}
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: "var(--muted)",
+                            marginTop: 2,
+                          }}
+                        >
+                          🧠 Context: {p.context_size || 30000} tokens
+                        </div>
                       </div>
                     );
                   }

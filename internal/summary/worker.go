@@ -134,7 +134,11 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 	prompt += "---" + "\n" + "New messages to incorporate:" + "\n" + body
 
 	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
-	modelName, _, summaryModel := chat.ParseModelConfig(modelValue, chat.DefaultModel)
+	modelName, _, summaryModel, contextSize := chat.ParseModelConfig(modelValue, chat.DefaultModel)
+
+	if contextSize <= 0 {
+		contextSize = 30000
+	}
 
 	// Use summary_model if explicitly configured, otherwise fallback to summary_model from modelValue, otherwise the general model
 	finalModel := w.Store.ResolveConfig(conversationID, conv.IntegrationID, "summary_model", "")
@@ -151,7 +155,7 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 	reply, stats, err := client.Chat(ctx, finalModel, []llm.Message{
 		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific and structured. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
-	})
+	}, contextSize)
 	if err != nil {
 		log.Printf("[ERROR] Summarization failed for conversation %s: %v", conversationID, err)
 		return err

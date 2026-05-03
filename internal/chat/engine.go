@@ -22,7 +22,7 @@ const DefaultModel = "llama3.2"
 type LLMClientFactory func(baseURL, apiKey string) LLM
 
 type LLM interface {
-	Chat(ctx context.Context, model string, msgs []llm.Message) (string, llm.Stats, error)
+	Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error)
 }
 
 type Engine struct {
@@ -200,7 +200,11 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	}
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
 	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
-	modelName, requestDelay, _ := ParseModelConfig(modelValue, DefaultModel)
+	modelName, requestDelay, _, contextSize := ParseModelConfig(modelValue, DefaultModel)
+
+	if contextSize <= 0 {
+		contextSize = 30000
+	}
 
 	if requestDelay > 0 {
 		if debugEnabled {
@@ -265,7 +269,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		log.Printf("[DEBUG] ConversationId=%s, LLM Messages: %v", req.ConversationID, msgs)
 	}
 
-	reply, stats, err := client.Chat(ctx, modelName, msgs)
+	reply, stats, err := client.Chat(ctx, modelName, msgs, contextSize)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			log.Printf("[ERROR] LLM Chat canceled for conversation %s and sender %s", req.ConversationID, req.SenderName)
@@ -296,20 +300,21 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	return resp, nil
 }
 
-func ParseModelConfig(value string, defaultModel string) (string, int, string) {
+func ParseModelConfig(value string, defaultModel string) (string, int, string, int) {
 	var mCfg struct {
 		Model        string `json:"model"`
 		RequestDelay int    `json:"request_delay"`
 		SummaryModel string `json:"summary_model"`
+		ContextSize  int    `json:"context_size"`
 	}
 	if err := json.Unmarshal([]byte(value), &mCfg); err == nil && mCfg.Model != "" {
-		return mCfg.Model, mCfg.RequestDelay, mCfg.SummaryModel
+		return mCfg.Model, mCfg.RequestDelay, mCfg.SummaryModel, mCfg.ContextSize
 	}
 	// Fallback to legacy behavior if not JSON
 	if value == "" {
-		return defaultModel, 0, ""
+		return defaultModel, 0, "", 0
 	}
-	return value, 0, ""
+	return value, 0, "", 0
 }
 
 func atoiDefault(s string, def int) int {

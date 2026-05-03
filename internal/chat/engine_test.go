@@ -11,8 +11,8 @@ import (
 
 type mockLLM struct{}
 
-func (m *mockLLM) Chat(ctx context.Context, model string, msgs []llm.Message) (string, error) {
-	return "mock reply", nil
+func (m *mockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error) {
+	return "mock reply", llm.Stats{}, nil
 }
 
 func TestDeduplication(t *testing.T) {
