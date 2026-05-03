@@ -109,24 +109,22 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 
 	var body string
 	for _, m := range msgs {
-		label := "them"
+		label := "USER"
 		if m.IsOutbound == 1 {
-			label = "me"
+			label = "HOST"
 		}
-		if m.SenderName != "" && m.IsOutbound == 0 {
-			label = m.SenderName
-		}
-		body += fmt.Sprintf("%s: %s\n", label, m.Content)
+		body += fmt.Sprintf("[%s]: %s\n", label, m.Content)
 	}
 
 	prompt := "You are building a memory summary that will be injected into a chat AI system prompt to help it reply naturally as a specific person." + "\n"
+	prompt += "In the messages below, [HOST] is the account owner (the person you are writing for), and [USER] is the person chatting with them." + "\n"
 	prompt += "Your job is NOT to write a story recap and NOT to create a list of topics to redirect the conversation to." + "\n"
 	prompt += "Produce a structured snapshot the AI uses to: sound like the same person, remember what the other person shared, and match the emotional tone." + "\n\n"
 	prompt += "Format your output using exactly these section headers:" + "\n\n"
-	prompt += "**My speaking style:** How does 'me' text? Sentence length, vocabulary, humor level, formality, recurring words or phrases, quirks." + "\n\n"
-	prompt += "**Relationship dynamic:** How do we talk to each other? Flirty, friendly, playful, guarded? What is the vibe and push-pull between us?" + "\n\n"
-	prompt += "**What they've shared about themselves:** Personal details, feelings, stories, preferences the other person mentioned." + "\n\n"
-	prompt += "**What I've shared about myself:** Personal details or stories I mentioned. Be vague where nothing concrete was said." + "\n\n"
+	prompt += "**My speaking style:** How does the [HOST] (me) text? Sentence length, vocabulary, humor level, formality, recurring words or phrases, quirks." + "\n\n"
+	prompt += "**Relationship dynamic:** How do the [HOST] and [USER] talk to each other? Flirty, friendly, playful, guarded? What is the vibe and push-pull between us?" + "\n\n"
+	prompt += "**What the USER shared about themselves:** Personal details, feelings, stories, preferences the [USER] mentioned in their messages." + "\n\n"
+	prompt += "**What I (HOST) shared about myself:** Personal details or stories [HOST] mentioned. Be vague where nothing concrete was said." + "\n\n"
 	prompt += "**Recent conversation thread:** 2-3 sentences on what we were just talking about and the emotional direction." + "\n\n"
 	prompt += "**Active context:** Background things to be aware of — NOT topics to redirect to. Just things that might come up naturally." + "\n"
 
@@ -136,11 +134,21 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 	prompt += "---" + "\n" + "New messages to incorporate:" + "\n" + body
 
 	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
-	modelName, _ := chat.ParseModelConfig(modelValue, chat.DefaultModel)
+	modelName, _, summaryModel := chat.ParseModelConfig(modelValue, chat.DefaultModel)
+
+	// Use summary_model if explicitly configured, otherwise fallback to summary_model from modelValue, otherwise the general model
+	finalModel := w.Store.ResolveConfig(conversationID, conv.IntegrationID, "summary_model", "")
+	if finalModel == "" {
+		finalModel = summaryModel
+	}
+	if finalModel == "" {
+		finalModel = modelName
+	}
+
 	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
 	apiKey := w.Store.GetConfigValue("llm_key", "")
 	client := w.Engine.NewLLM(baseURL, apiKey)
-	reply, err := client.Chat(ctx, modelName, []llm.Message{
+	reply, stats, err := client.Chat(ctx, finalModel, []llm.Message{
 		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific and structured. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
 	})
@@ -148,6 +156,8 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 		log.Printf("[ERROR] Summarization failed for conversation %s: %v", conversationID, err)
 		return err
 	}
+
+	log.Printf("[DEBUG] Summarization Usage for conv %s: Input=%d, Output=%d, Total=%d", conversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 
 	// Delete old summaries before inserting the new all-inclusive one.
 	if err := w.Store.DeleteAllSummariesForConversation(conversationID); err != nil {

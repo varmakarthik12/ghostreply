@@ -22,7 +22,7 @@ const DefaultModel = "llama3.2"
 type LLMClientFactory func(baseURL, apiKey string) LLM
 
 type LLM interface {
-	Chat(ctx context.Context, model string, msgs []llm.Message) (string, error)
+	Chat(ctx context.Context, model string, msgs []llm.Message) (string, llm.Stats, error)
 }
 
 type Engine struct {
@@ -198,7 +198,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	}
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
 	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
-	modelName, requestDelay := ParseModelConfig(modelValue, DefaultModel)
+	modelName, requestDelay, _ := ParseModelConfig(modelValue, DefaultModel)
 
 	if requestDelay > 0 {
 		if debugEnabled {
@@ -263,10 +263,26 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		log.Printf("[DEBUG] LLM Messages: %v", msgs)
 	}
 
-	reply, err := client.Chat(ctx, modelName, msgs)
+	reply, stats, err := client.Chat(ctx, modelName, msgs)
 	if err != nil {
-		log.Printf("[ERROR] LLM Chat failed: %v", err)
+		if errors.Is(err, context.Canceled) {
+			log.Printf("[ERROR] LLM Chat canceled for conv %s", req.ConversationID)
+			log.Printf("[ERROR] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("[ERROR] LLM Chat timed out for conv %s", req.ConversationID)
+			log.Printf("[ERROR] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+
+		} else {
+			log.Printf("[ERROR] LLM Chat failed: %v", err)
+			log.Printf("[ERROR] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+
+		}
 		return nil, fmt.Errorf("llm: %w", err)
+	}
+
+	if debugEnabled {
+		log.Printf("[DEBUG] LLM Usage: Input=%d, Output=%d, Total=%d", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 	}
 
 	resp := &WebhookResponse{Reply: reply}
@@ -278,19 +294,20 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	return resp, nil
 }
 
-func ParseModelConfig(value string, defaultModel string) (string, int) {
+func ParseModelConfig(value string, defaultModel string) (string, int, string) {
 	var mCfg struct {
 		Model        string `json:"model"`
 		RequestDelay int    `json:"request_delay"`
+		SummaryModel string `json:"summary_model"`
 	}
 	if err := json.Unmarshal([]byte(value), &mCfg); err == nil && mCfg.Model != "" {
-		return mCfg.Model, mCfg.RequestDelay
+		return mCfg.Model, mCfg.RequestDelay, mCfg.SummaryModel
 	}
 	// Fallback to legacy behavior if not JSON
 	if value == "" {
-		return defaultModel, 0
+		return defaultModel, 0, ""
 	}
-	return value, 0
+	return value, 0, ""
 }
 
 func atoiDefault(s string, def int) int {
