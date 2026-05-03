@@ -16,7 +16,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       is_push: ${{ steps.resolve.outputs.is_push }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Resolve Tag
@@ -52,7 +52,7 @@ jobs:
     if: github.event_name != 'release' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -82,7 +82,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
