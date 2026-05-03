@@ -135,11 +135,12 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 	}
 	prompt += "---" + "\n" + "New messages to incorporate:" + "\n" + body
 
-	model := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
+	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
+	modelName, _ := chat.ParseModelConfig(modelValue, chat.DefaultModel)
 	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
 	apiKey := w.Store.GetConfigValue("llm_key", "")
 	client := w.Engine.NewLLM(baseURL, apiKey)
-	reply, err := client.Chat(ctx, model, []llm.Message{
+	reply, err := client.Chat(ctx, modelName, []llm.Message{
 		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific and structured. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
 	})

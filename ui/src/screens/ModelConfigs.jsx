@@ -22,26 +22,49 @@ const MODEL_SUGGESTIONS = [
 ];
 
 function ModelForm({ init, integrations, onSave, onCancel }) {
+  const parseValue = (val) => {
+    try {
+      const parsed = JSON.parse(val);
+      if (parsed && typeof parsed === "object" && parsed.model) {
+        return { model: parsed.model, request_delay: parsed.request_delay || 0 };
+      }
+    } catch (e) {}
+    return { model: val || "", request_delay: 0 };
+  };
+
+  const initialValues = parseValue(init?.value);
+
   const [f, setF] = useState({
     scope: "global",
     scope_id: "",
-    value: "",
+    model: initialValues.model,
+    request_delay: initialValues.request_delay,
     ...init,
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
   async function save() {
-    if (!f.value.trim()) {
+    if (!f.model.trim()) {
       setErr("Model name is required.");
       return;
     }
     setSaving(true);
     setErr("");
     try {
-      if (init?.id)
-        await apiPut("/model-configs/" + init.id, { value: f.value });
-      else await apiPost("/model-configs", f);
+      const payload = {
+        ...f,
+        value: JSON.stringify({
+          model: f.model,
+          request_delay: parseInt(f.request_delay) || 0,
+        }),
+      };
+      // Remove local UI fields from DB payload
+      delete payload.model;
+      delete payload.request_delay;
+
+      if (init?.id) await apiPut("/model-configs/" + init.id, payload);
+      else await apiPost("/model-configs", payload);
       onSave();
     } catch (e) {
       setErr(e.message);
@@ -99,8 +122,8 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
       <Field label="Model Name *">
         <input
           list="model-list"
-          value={f.value}
-          onChange={(e) => setF({ ...f, value: e.target.value })}
+          value={f.model}
+          onChange={(e) => setF({ ...f, model: e.target.value })}
           placeholder="llama3.2"
         />
         <datalist id="model-list">
@@ -108,6 +131,19 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
             <option key={m} value={m} />
           ))}
         </datalist>
+      </Field>
+      <Field label="Request Delay (seconds)">
+        <input
+          type="number"
+          min="0"
+          value={f.request_delay}
+          onChange={(e) => setF({ ...f, request_delay: e.target.value })}
+          placeholder="0"
+        />
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Wait this many seconds before triggering the LLM to avoid overwhelming
+          it.
+        </div>
       </Field>
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
         Inheritance: conversation → integration → global → default (llama3.2)
@@ -170,7 +206,30 @@ export default function ModelConfigs() {
               {r.scope_id ? shortId(r.scope_id) : "—"}
             </td>
             <td>
-              <code>{r.value}</code>
+              {(() => {
+                try {
+                  const p = JSON.parse(r.value);
+                  if (p && p.model) {
+                    return (
+                      <div>
+                        <code>{p.model}</code>
+                        {p.request_delay > 0 && (
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "var(--primary)",
+                              marginTop: 2,
+                            }}
+                          >
+                            ⏱️ {p.request_delay}s delay
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                } catch (e) {}
+                return <code>{r.value}</code>;
+              })()}
             </td>
             <td>
               <button

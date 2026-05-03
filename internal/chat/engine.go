@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/llm"
@@ -196,7 +197,19 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		summaryText = sm.Text
 	}
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
-	model := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
+	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
+	modelName, requestDelay := ParseModelConfig(modelValue, DefaultModel)
+
+	if requestDelay > 0 {
+		if debugEnabled {
+			log.Printf("[DEBUG] Delaying auto-reply by %d seconds as per model config", requestDelay)
+		}
+		select {
+		case <-time.After(time.Duration(requestDelay) * time.Second):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 
 	style := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "reply_style", "brief")
 
@@ -246,11 +259,11 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	apiKey := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_key", "")
 	client := e.NewLLM(baseURL, apiKey)
 	if debugEnabled {
-		log.Printf("[DEBUG] LLM Model: %s", model)
+		log.Printf("[DEBUG] LLM Model: %s", modelName)
 		log.Printf("[DEBUG] LLM Messages: %v", msgs)
 	}
 
-	reply, err := client.Chat(ctx, model, msgs)
+	reply, err := client.Chat(ctx, modelName, msgs)
 	if err != nil {
 		log.Printf("[ERROR] LLM Chat failed: %v", err)
 		return nil, fmt.Errorf("llm: %w", err)
@@ -263,6 +276,21 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	}
 
 	return resp, nil
+}
+
+func ParseModelConfig(value string, defaultModel string) (string, int) {
+	var mCfg struct {
+		Model        string `json:"model"`
+		RequestDelay int    `json:"request_delay"`
+	}
+	if err := json.Unmarshal([]byte(value), &mCfg); err == nil && mCfg.Model != "" {
+		return mCfg.Model, mCfg.RequestDelay
+	}
+	// Fallback to legacy behavior if not JSON
+	if value == "" {
+		return defaultModel, 0
+	}
+	return value, 0
 }
 
 func atoiDefault(s string, def int) int {
