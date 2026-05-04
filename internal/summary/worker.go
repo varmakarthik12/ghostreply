@@ -80,11 +80,18 @@ func (w *Worker) SummarizeIfNeeded(ctx context.Context, conversationID string, m
 // then deletes all summarized messages and all old summaries, leaving
 // exactly one up-to-date summary.
 func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
+	// Mark as summary priority for the LLM queue
+	ctx = llm.WithPriority(ctx, false)
+
 	maxPreviousSummaries := 5
 	conv, err := w.Store.FindConversationByID(conversationID)
 	if err != nil {
 		return err
 	}
+
+	log.Printf("[REQ] Summarize start: conversation=%s title=%s", conversationID, conv.Title)
+	ctx = llm.WithLabel(ctx, fmt.Sprintf("Summary:%s", conv.Title))
+
 	msgs, err := w.Store.RecentMessages(conversationID, 0)
 	if err != nil {
 		return err

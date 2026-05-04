@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/varmakarthik12/ghostreply/internal/chat"
 	"github.com/varmakarthik12/ghostreply/internal/db"
+	"github.com/varmakarthik12/ghostreply/internal/llm"
 	"github.com/varmakarthik12/ghostreply/internal/summary"
 )
 
@@ -21,7 +23,18 @@ type API struct {
 }
 
 func NewAPI(store *db.Store, token, llmURL string, factory chat.LLMClientFactory) *API {
-	engine := chat.NewEngine(store, llmURL, factory)
+	queue := llm.NewQueue(store)
+
+	// Wrap factory to inject the shared queue into every created client
+	wrappedFactory := func(baseURL, apiKey string) chat.LLM {
+		client := factory(baseURL, apiKey)
+		if c, ok := client.(*llm.Client); ok {
+			c.Queue = queue
+		}
+		return client
+	}
+
+	engine := chat.NewEngine(store, llmURL, wrappedFactory)
 	worker := summary.NewWorker(store, engine, 0)
 	return &API{Store: store, Engine: engine, Worker: worker, Token: token, LLMURL: llmURL}
 }
@@ -106,6 +119,8 @@ func (a *API) autoReply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	log.Printf("[REQ] AutoReply triggered: integration=%s Conversation_id=%s, senderName=%s", integrationID, externalID, req.SenderName)
+
 	req.IntegrationID = integrationID
 	req.ConversationID = externalID
 

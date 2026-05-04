@@ -24,6 +24,12 @@ const CONFIG_KEYS = [
     desc: "API key — leave blank for Ollama",
   },
   {
+    key: "max_llm_concurrency",
+    default: "5",
+    group: "llm",
+    desc: "Maximum concurrent LLM requests (Engine + Summary)",
+  },
+  {
     key: "summary_threshold",
     default: "50",
     group: "summary",
@@ -162,14 +168,17 @@ export default function Settings() {
   // LLM quick-config state
   const [llmUrl, setLlmUrl] = useState("");
   const [llmKey, setLlmKey] = useState("");
+  const [maxConcurrency, setMaxConcurrency] = useState("5");
   const [savingLlm, setSavingLlm] = useState(false);
 
   useEffect(() => {
     if (!s.data) return;
     const url = s.data.find((c) => c.scope === "global" && c.key === "llm_url");
     const key = s.data.find((c) => c.scope === "global" && c.key === "llm_key");
+    const mc = s.data.find((c) => c.scope === "global" && c.key === "max_llm_concurrency");
     if (url) setLlmUrl(url.value);
     if (key) setLlmKey(key.value);
+    if (mc) setMaxConcurrency(mc.value);
   }, [s.data]);
 
   async function saveLlmConfig() {
@@ -190,6 +199,7 @@ export default function Settings() {
       };
       await upsert("llm_url", llmUrl || "http://localhost:11434");
       if (llmKey !== "") await upsert("llm_key", llmKey);
+      await upsert("max_llm_concurrency", maxConcurrency || "5");
       toast("LLM config saved");
       reload();
     } catch (e) {
@@ -253,6 +263,16 @@ export default function Settings() {
               value={llmKey}
               onChange={(e) => setLlmKey(e.target.value)}
               placeholder="sk-… or blank for Ollama"
+            />
+          </Field>
+          <Field label="Max Concurrency">
+            <input
+              type="number"
+              min="1"
+              max="50"
+              value={maxConcurrency}
+              onChange={(e) => setMaxConcurrency(e.target.value)}
+              placeholder="5"
             />
           </Field>
         </div>

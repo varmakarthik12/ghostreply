@@ -73,6 +73,9 @@ type WebhookResponse struct {
 var ErrIntegrationNotFound = errors.New("integration not found")
 
 func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*WebhookResponse, error) {
+	// Mark as engine priority for the LLM queue
+	ctx = llm.WithPriority(ctx, true)
+
 	// 1. Cancellation logic: cancel previous request for this conversation
 	convKey := req.IntegrationID + ":" + req.ConversationID
 	ctx, cancel := context.WithCancel(ctx)
@@ -104,6 +107,13 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		conv.ChatType = req.ChatType
 		_ = e.Store.CreateConversation(conv)
 	}
+
+	// Log request start with title
+	log.Printf("[REQ] AutoReply start: conversation=%s title=%s sender=%s",
+		req.ConversationID, conv.Title, req.SenderName)
+
+	// Attach label for queue logging
+	ctx = llm.WithLabel(ctx, fmt.Sprintf("AutoReply:%s", conv.Title))
 
 	// 4. Sync History if provided
 	for _, hm := range req.History {

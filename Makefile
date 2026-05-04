@@ -20,6 +20,7 @@ build:
 	cd ui && npm run build
 	@echo "Building backend..."
 	go build -ldflags "-H=windowsgui" -o ghostreply.exe ./cmd/ghostreply/main.go
+	go build -o ghostreply2.exe ./cmd/ghostreply/main.go
 
 clean:
 	rm -rf tmp

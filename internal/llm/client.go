@@ -28,6 +28,7 @@ type Client struct {
 	BaseURL string
 	APIKey  string
 	HTTP    *http.Client
+	Queue   *Queue
 }
 
 func NewClient(baseURL, apiKey string) *Client {
@@ -38,9 +39,37 @@ func NewClient(baseURL, apiKey string) *Client {
 	}
 }
 
+type contextKey string
+
+const priorityKey contextKey = "llm_priority"
+const labelKey contextKey = "llm_label"
+
+// WithPriority marks the context as either an engine or summary request for queue fairness.
+func WithPriority(ctx context.Context, isEngine bool) context.Context {
+	return context.WithValue(ctx, priorityKey, isEngine)
+}
+
+// WithLabel attaches a human-readable label to the request for logging.
+func WithLabel(ctx context.Context, label string) context.Context {
+	return context.WithValue(ctx, labelKey, label)
+}
+
 // Chat sends messages to the model and returns the assistant reply.
 // Auto-detects Ollama vs OpenAI-compatible based on whether BaseURL contains "v1" or APIKey is set.
 func (c *Client) Chat(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
+	if c.Queue != nil {
+		isEngine, _ := ctx.Value(priorityKey).(bool)
+		label, _ := ctx.Value(labelKey).(string)
+		if label == "" {
+			label = "unlabeled"
+		}
+		release, err := c.Queue.Acquire(ctx, label, isEngine)
+		if err != nil {
+			return "", Stats{}, err
+		}
+		defer release()
+	}
+
 	if c.useOpenAI() {
 		return c.chatOpenAI(ctx, model, msgs, contextSize)
 	}
