@@ -94,12 +94,8 @@ func main() {
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		dbOK := store.Ping() == nil
-		prefix := token
-		if len(prefix) > 8 {
-			prefix = prefix[:8]
-		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","token_prefix":"%s","llm_url":"%s","db_ok":%t}`, prefix, store.GetConfigValue("llm_url", "http://localhost:11434"), dbOK)
+		fmt.Fprintf(w, `{"status":"ok","llm_url":"%s","db_ok":%t}`, store.GetConfigValue("llm_url", "http://localhost:11434"), dbOK)
 	})
 
 	r.Route("/api", func(r chi.Router) { apiHandler.Mount(r) })
