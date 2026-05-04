@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -28,8 +30,8 @@ var (
 	dbPath    = flag.String("db-path", "", "SQLite database file path (default: ~/.ghostreply/ghostreply.db)")
 )
 
-// defaultDBPath returns ~/.ghostreply/ghostreply.db, creating the directory if needed.
-func defaultDBPath() (string, error) {
+// defaultDataDir returns ~/.ghostreply, creating the directory if needed.
+func defaultDataDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
@@ -38,7 +40,33 @@ func defaultDBPath() (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("cannot create data directory %s: %w", dir, err)
 	}
-	return filepath.Join(dir, "ghostreply.db"), nil
+	return dir, nil
+}
+
+// setupLogging rotates the old log file and sets up the standard logger to write to both stdout and a new logs.txt.
+func setupLogging(dataDir string) error {
+	logFile := filepath.Join(dataDir, "logs.txt")
+
+	// Rotate old log file if it exists
+	if _, err := os.Stat(logFile); err == nil {
+		timestamp := time.Now().Format("20060102_150405")
+		rotatedFile := filepath.Join(dataDir, fmt.Sprintf("log_%s.txt", timestamp))
+		if err := os.Rename(logFile, rotatedFile); err != nil {
+			return fmt.Errorf("failed to rotate log file: %w", err)
+		}
+	}
+
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to create log file: %w", err)
+	}
+
+	// Use MultiWriter to write to both stdout and the file
+	multi := io.MultiWriter(os.Stdout, f)
+	log.SetOutput(multi)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	return nil
 }
 
 func generateToken() string {
@@ -50,14 +78,19 @@ func generateToken() string {
 func main() {
 	flag.Parse()
 
+	dataDir, err := defaultDataDir()
+	if err != nil {
+		log.Fatalf("setup: %v", err)
+	}
+
+	if err := setupLogging(dataDir); err != nil {
+		log.Fatalf("logging: %v", err)
+	}
+
 	resolvedDB := *dbPath
 	usingDefault := false
 	if resolvedDB == "" {
-		var err error
-		resolvedDB, err = defaultDBPath()
-		if err != nil {
-			log.Fatalf("db: %v", err)
-		}
+		resolvedDB = filepath.Join(dataDir, "ghostreply.db")
 		usingDefault = true
 	}
 
@@ -107,12 +140,12 @@ func main() {
 	if usingDefault {
 		dbLabel = resolvedDB + "  (default)"
 	}
-	fmt.Printf("=== GhostReply ===\n")
-	fmt.Printf("Token: %s\n", token)
-	fmt.Printf("Port:  %s\n", *port)
-	fmt.Printf("DB:    %s\n", dbLabel)
-	fmt.Printf("LLM:   %s\n", store.GetConfigValue("llm_url", "http://localhost:11434"))
-	fmt.Printf("Open   http://localhost:%s\n", *port)
+	log.Printf("=== GhostReply ===")
+	log.Printf("Token: %s", token)
+	log.Printf("Port:  %s", *port)
+	log.Printf("DB:    %s", dbLabel)
+	log.Printf("LLM:   %s", store.GetConfigValue("llm_url", "http://localhost:11434"))
+	log.Printf("Open   http://localhost:%s", *port)
 	log.Fatal(http.ListenAndServe(":"+*port, r))
 }
 
