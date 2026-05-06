@@ -24,6 +24,7 @@ type LLMClientFactory func(baseURL, apiKey string) LLM
 
 type LLM interface {
 	Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error)
+	ListModels(ctx context.Context) ([]string, error)
 }
 
 type Engine struct {

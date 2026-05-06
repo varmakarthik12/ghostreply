@@ -157,3 +157,42 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), stats, nil
 }
+
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	if c.useOpenAI() {
+		// For OpenAI, we could call /v1/models but it's often too many or not useful
+		// for this specific app's context. We'll just return nil for now.
+		return nil, nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/tags", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama models status %d", resp.StatusCode)
+	}
+
+	var out struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, m := range out.Models {
+		names = append(names, m.Name)
+	}
+	return names, nil
+}
+

@@ -84,6 +84,7 @@ func (a *API) Mount(r chi.Router) {
 		r.Get("/session-stats", a.sessionStats)
 
 		r.Get("/stats", a.stats)
+		r.Get("/ollama/models", a.listOllamaModels)
 	})
 }
 
@@ -501,4 +502,19 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request) {
 		"messages":      m,
 		"session":       session,
 	})
+}
+func (a *API) listOllamaModels(w http.ResponseWriter, r *http.Request) {
+	baseURL := a.Store.GetConfigValue("llm_url", a.LLMURL)
+	apiKey := a.Store.GetConfigValue("llm_key", "")
+	client := a.Engine.NewLLM(baseURL, apiKey)
+
+	models, err := client.ListModels(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if models == nil {
+		models = []string{}
+	}
+	writeJSON(w, http.StatusOK, models)
 }

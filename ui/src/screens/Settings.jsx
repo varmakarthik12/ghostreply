@@ -59,6 +59,18 @@ const CONFIG_KEYS = [
     group: "debug",
     desc: "Log entire request/response for AutoReply (caution: verbose)",
   },
+  {
+    key: "stale_reply_threshold_hours",
+    default: "0",
+    group: "other",
+    desc: "Skip auto-reply if message is older than this (0 to disable)",
+  },
+  {
+    key: "timezone",
+    default: "UTC",
+    group: "other",
+    desc: "Target timezone (e.g. America/New_York, Asia/Kolkata)",
+  },
 ];
 
 function ConfigForm({ init, onSave, onCancel }) {

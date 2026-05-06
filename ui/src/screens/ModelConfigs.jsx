@@ -19,9 +19,10 @@ const MODEL_SUGGESTIONS = [
   "gpt-4o",
   "gpt-4o-mini",
   "gpt-3.5-turbo",
+  "gemini-2.0-flash",
 ];
 
-function ModelForm({ init, integrations, onSave, onCancel }) {
+function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
   const parseValue = (val) => {
     try {
       const parsed = JSON.parse(val);
@@ -138,9 +139,11 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
           placeholder="llama3.2"
         />
         <datalist id="model-list">
-          {MODEL_SUGGESTIONS.map((m) => (
-            <option key={m} value={m} />
-          ))}
+          {[...new Set([...(ollamaModels || []), ...MODEL_SUGGESTIONS])].map(
+            (m) => (
+              <option key={m} value={m} />
+            ),
+          )}
         </datalist>
       </Field>
       <Field label="Summary Model">
@@ -199,8 +202,10 @@ function ModelForm({ init, integrations, onSave, onCancel }) {
 export default function ModelConfigs() {
   const [s, reload] = useResource(() => apiGet("/model-configs"), []);
   const [intS] = useResource(() => apiGet("/integrations"), []);
+  const [ollamaS] = useResource(() => apiGet("/ollama/models"), []);
   const [modal, setModal] = useState(null);
   const ints = intS.data || [];
+  const ollamaModels = ollamaS.data || [];
 
   async function del(id) {
     if (!window.confirm("Delete model config?")) return;
@@ -311,6 +316,7 @@ export default function ModelConfigs() {
           <ModelForm
             init={modal}
             integrations={ints}
+            ollamaModels={ollamaModels}
             onSave={() => {
               setModal(null);
               toast("Saved");
