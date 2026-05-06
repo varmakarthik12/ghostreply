@@ -79,6 +79,10 @@ func (a *API) Mount(r chi.Router) {
 		r.Put("/system-prompts/{id}", a.updateSystemPrompt)
 		r.Delete("/system-prompts/{id}", a.deleteSystemPrompt)
 
+		r.Get("/activity-logs", a.listActivityLogs)
+		r.Post("/activity-logs/{id}/cancel", a.cancelActivityLog)
+		r.Get("/session-stats", a.sessionStats)
+
 		r.Get("/stats", a.stats)
 	})
 }
@@ -359,7 +363,7 @@ func (a *API) triggerSummary(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "conversation_id required"})
 		return
 	}
-	go a.Worker.Summarize(context.Background(), body.ConversationID)
+	go a.Worker.Summarize(context.Background(), body.ConversationID, "manual_summary")
 	writeJSON(w, 202, map[string]string{"status": "triggered", "conversation_id": body.ConversationID})
 }
 
@@ -451,9 +455,50 @@ func (a *API) deleteSystemPrompt(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ----- activity logs -----
+
+func (a *API) listActivityLogs(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Store.GetActivityLogs(
+		r.URL.Query().Get("conversation_id"),
+		r.URL.Query().Get("status"),
+		r.URL.Query().Get("type"),
+		50,
+	)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
+func (a *API) cancelActivityLog(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := a.Store.UpdateActivityLog(id, "cancelled", "Manually cancelled", ""); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"id": id, "status": "cancelled"})
+}
+
+func (a *API) sessionStats(w http.ResponseWriter, r *http.Request) {
+	allTime := r.URL.Query().Get("all_time") == "true"
+	out, err := a.Store.GetSessionStats(allTime)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, out)
+}
+
 // ----- stats -----
 
 func (a *API) stats(w http.ResponseWriter, r *http.Request) {
 	i, c, m := a.Store.Stats()
-	writeJSON(w, 200, map[string]int{"integrations": i, "conversations": c, "messages": m})
+	session, _ := a.Store.GetCurrentSession()
+	writeJSON(w, 200, map[string]interface{}{
+		"integrations":  i,
+		"conversations": c,
+		"messages":      m,
+		"session":       session,
+	})
 }

@@ -7,6 +7,7 @@ const NAV = [
   { id: "prompts", icon: "🎭", label: "System Prompts" },
   { id: "models", icon: "🤖", label: "Model Configs" },
   { id: "summaries", icon: "📝", label: "Summaries" },
+  { id: "logs", icon: "📋", label: "Activity Logs" },
   { id: "links", icon: "🔗", label: "Identity Links" },
   { id: "settings", icon: "⚙️", label: "Settings" },
   { id: "test", icon: "🧪", label: "Chat Test" },

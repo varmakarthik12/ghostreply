@@ -208,6 +208,33 @@ type SystemPrompt struct {
 	Text    string `json:"text"`
 }
 
+type ServerSession struct {
+	ID        string `json:"id"`
+	StartedAt string `json:"started_at"`
+	StoppedAt string `json:"stopped_at,omitempty"`
+}
+
+type ActivityLog struct {
+	ID                string `json:"id"`
+	SessionID         string `json:"session_id"`
+	Type              string `json:"type"`
+	ConversationID    string `json:"conversation_id"`
+	ConversationTitle string `json:"conversation_title"`
+	RequestType       string `json:"request_type"`
+	Status            string `json:"status"`
+	ErrorMsg          string `json:"error_msg,omitempty"`
+	Metadata          string `json:"metadata,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	CompletedAt       string `json:"completed_at,omitempty"`
+}
+
+type OperationStats struct {
+	SessionID string `json:"session_id"`
+	Type      string `json:"type"`
+	Status    string `json:"status"`
+	Count     int    `json:"count"`
+}
+
 // ----- Integrations -----
 
 func (s *Store) ListIntegrations() ([]Integration, error) {
@@ -761,6 +788,156 @@ func (s *Store) Stats() (integrations, conversations, messages int) {
 }
 
 func (s *Store) Ping() error { return s.DB.Ping() }
+
+// ----- Sessions & Activity Logs -----
+var CurrentSessionID string
+
+func (s *Store) CreateServerSession() (string, error) {
+	id := uuid.NewString()
+	_, err := s.DB.Exec(`INSERT INTO server_sessions (id, started_at) VALUES (?, CURRENT_TIMESTAMP)`, id)
+	if err != nil {
+		return "", err
+	}
+	CurrentSessionID = id
+	return id, nil
+}
+
+func (s *Store) UpdateServerSession(id string) error {
+	_, err := s.DB.Exec(`UPDATE server_sessions SET stopped_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) GetCurrentSession() (*ServerSession, error) {
+	if CurrentSessionID == "" {
+		return nil, sql.ErrNoRows
+	}
+	row := s.DB.QueryRow(`SELECT id, started_at, COALESCE(stopped_at,'') FROM server_sessions WHERE id=?`, CurrentSessionID)
+	var ss ServerSession
+	if err := row.Scan(&ss.ID, &ss.StartedAt, &ss.StoppedAt); err != nil {
+		return nil, err
+	}
+	return &ss, nil
+}
+
+func (s *Store) CreateActivityLog(log *ActivityLog) error {
+	if log.ID == "" {
+		log.ID = uuid.NewString()
+	}
+	if log.SessionID == "" {
+		log.SessionID = CurrentSessionID
+	}
+	_, err := s.DB.Exec(`INSERT INTO activity_logs (id, session_id, type, conversation_id, conversation_title, request_type, status, error_msg, metadata) VALUES (?,?,?,?,?,?,?,?,?)`,
+		log.ID, log.SessionID, log.Type, log.ConversationID, log.ConversationTitle, log.RequestType, log.Status, nullable(log.ErrorMsg), nullable(log.Metadata))
+	if err == nil {
+		s.incrementStat(log.SessionID, log.Type, log.Status)
+	}
+	return err
+}
+
+func (s *Store) UpdateActivityLog(id, status, errorMsg, metadata string) error {
+	// Get old status to update stats
+	var oldStatus, sessionID, logType string
+	err := s.DB.QueryRow(`SELECT status, session_id, type FROM activity_logs WHERE id=?`, id).Scan(&oldStatus, &sessionID, &logType)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.DB.Exec(`UPDATE activity_logs SET status=?, error_msg=?, metadata=?, completed_at=CURRENT_TIMESTAMP WHERE id=?`,
+		status, nullable(errorMsg), nullable(metadata), id)
+	if err == nil && oldStatus != status {
+		s.decrementStat(sessionID, logType, oldStatus)
+		s.incrementStat(sessionID, logType, status)
+	}
+	return err
+}
+
+func (s *Store) incrementStat(sessionID, logType, status string) {
+	_, _ = s.DB.Exec(`INSERT INTO operation_stats (session_id, type, status, count) VALUES (?,?,?,1)
+		ON CONFLICT(session_id, type, status) DO UPDATE SET count=count+1`,
+		sessionID, logType, status)
+}
+
+func (s *Store) decrementStat(sessionID, logType, status string) {
+	_, _ = s.DB.Exec(`UPDATE operation_stats SET count=MAX(0, count-1) WHERE session_id=? AND type=? AND status=?`,
+		sessionID, logType, status)
+}
+
+func (s *Store) GetActivityLogs(convID, status, logType string, limit int) ([]ActivityLog, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	q := `SELECT id, session_id, type, conversation_id, COALESCE(conversation_title,''), request_type, status, COALESCE(error_msg,''), COALESCE(metadata,''), created_at, COALESCE(completed_at,'') FROM activity_logs`
+	where := []string{}
+	args := []interface{}{}
+	if convID != "" {
+		where = append(where, "conversation_id=?")
+		args = append(args, convID)
+	}
+	if status != "" {
+		where = append(where, "status=?")
+		args = append(args, status)
+	}
+	if logType != "" {
+		where = append(where, "type=?")
+		args = append(args, logType)
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ActivityLog{}
+	for rows.Next() {
+		var l ActivityLog
+		if err := rows.Scan(&l.ID, &l.SessionID, &l.Type, &l.ConversationID, &l.ConversationTitle, &l.RequestType, &l.Status, &l.ErrorMsg, &l.Metadata, &l.CreatedAt, &l.CompletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+func (s *Store) GetActivityLogByID(id string) (*ActivityLog, error) {
+	row := s.DB.QueryRow(`SELECT id, session_id, type, conversation_id, COALESCE(conversation_title,''), request_type, status, COALESCE(error_msg,''), COALESCE(metadata,''), created_at, COALESCE(completed_at,'') FROM activity_logs WHERE id=?`, id)
+	var l ActivityLog
+	if err := row.Scan(&l.ID, &l.SessionID, &l.Type, &l.ConversationID, &l.ConversationTitle, &l.RequestType, &l.Status, &l.ErrorMsg, &l.Metadata, &l.CreatedAt, &l.CompletedAt); err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+func (s *Store) GetSessionStats(allTime bool) ([]OperationStats, error) {
+	q := `SELECT type, status, SUM(count) FROM operation_stats`
+	args := []interface{}{}
+	if !allTime && CurrentSessionID != "" {
+		q += ` WHERE session_id=?`
+		args = append(args, CurrentSessionID)
+	}
+	q += ` GROUP BY type, status`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []OperationStats{}
+	for rows.Next() {
+		var st OperationStats
+		if err := rows.Scan(&st.Type, &st.Status, &st.Count); err != nil {
+			return nil, err
+		}
+		if !allTime {
+			st.SessionID = CurrentSessionID
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
 
 func nullable(s string) interface{} {
 	if s == "" {

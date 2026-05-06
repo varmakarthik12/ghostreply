@@ -164,6 +164,18 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		}
 	}
 
+	// Create Activity Log
+	logID := uuid.NewString()
+	activityLog := &db.ActivityLog{
+		ID:                logID,
+		Type:              "engine",
+		ConversationID:    conv.ID,
+		ConversationTitle: conv.Title,
+		RequestType:       "auto_reply",
+		Status:            "pending",
+	}
+	_ = e.Store.CreateActivityLog(activityLog)
+
 	// 5. Spam Prevention: Check consecutive assistant messages
 	maxConsecutive := atoiDefault(e.Store.ResolveConfig(conv.ID, req.IntegrationID, "max_consecutive_assistant_messages", "0"), 0)
 	if maxConsecutive > 0 {
@@ -183,6 +195,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 			if debugEnabled {
 				log.Printf("[DEBUG] Skipping auto-reply: maximum consecutive assistant messages reached (%d)", maxConsecutive)
 			}
+			_ = e.Store.UpdateActivityLog(logID, "cancelled", "Max consecutive assistant messages reached", "")
 			return &WebhookResponse{Reply: ""}, nil
 		}
 	}
@@ -192,6 +205,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	maxN := atoiDefault(e.Store.ResolveConfig(conv.ID, req.IntegrationID, "max_context_messages", "20"), 20)
 	recent, err := e.Store.RecentMessages(conv.ID, maxN)
 	if err != nil {
+		_ = e.Store.UpdateActivityLog(logID, "failure", err.Error(), "")
 		return nil, fmt.Errorf("recent messages: %w", err)
 	}
 	summaryText := ""
@@ -210,12 +224,16 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		if debugEnabled {
 			log.Printf("[DEBUG] Delaying auto-reply by %d seconds as per model config", requestDelay)
 		}
+		_ = e.Store.UpdateActivityLog(logID, "in_progress", "Waiting for request delay", "")
 		select {
 		case <-time.After(time.Duration(requestDelay) * time.Second):
 		case <-ctx.Done():
+			_ = e.Store.UpdateActivityLog(logID, "cancelled", "Request canceled during delay", "")
 			return nil, ctx.Err()
 		}
 	}
+
+	_ = e.Store.UpdateActivityLog(logID, "in_progress", "Generating reply...", "")
 
 	style := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "reply_style", "brief")
 
@@ -271,25 +289,27 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 
 	reply, stats, err := client.Chat(ctx, modelName, msgs, contextSize)
 	if err != nil {
+		status := "failure"
+		errMsg := err.Error()
 		if errors.Is(err, context.Canceled) {
+			status = "cancelled"
 			log.Printf("[ERROR] LLM Chat canceled for conversation %s and sender %s", req.ConversationID, req.SenderName)
-			log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
-
 		} else if errors.Is(err, context.DeadlineExceeded) {
 			log.Printf("[ERROR] LLM Chat timed out for conversation %s and sender %s", req.ConversationID, req.SenderName)
-			log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
-
 		} else {
 			log.Printf("[ERROR] LLM Chat failed for conversation %s and sender %s: %v", req.ConversationID, req.SenderName, err)
-			log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
-
 		}
+		log.Printf("[ERROR] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
+		_ = e.Store.UpdateActivityLog(logID, status, errMsg, "")
 		return nil, fmt.Errorf("llm: %w", err)
 	}
 
 	if debugEnabled {
 		log.Printf("[DEBUG] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 	}
+
+	meta, _ := json.Marshal(stats)
+	_ = e.Store.UpdateActivityLog(logID, "success", "", string(meta))
 
 	resp := &WebhookResponse{Reply: reply}
 	if debugEnabled {

@@ -2,11 +2,13 @@ package summary
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/varmakarthik12/ghostreply/internal/chat"
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/llm"
@@ -69,29 +71,45 @@ func (w *Worker) SummarizeIfNeeded(ctx context.Context, conversationID string, m
 		return nil
 	}
 	tokens := estimateTokensFor(w.Store, conversationID, count)
+	// Spec: summarize if count >= msgThresh OR tokens >= tokThresh
+	// Logic: skip if count < msgThresh AND tokens < tokThresh
 	if count < msgThresh && tokens < tokThresh {
 		return nil
 	}
-	return w.Summarize(ctx, conversationID)
+	return w.Summarize(ctx, conversationID, "auto_summary")
 }
 
 // Summarize forces an immediate summarization of a conversation.
-// It always chains all previous summaries to build a complete picture,
-// then deletes all summarized messages and all old summaries, leaving
-// exactly one up-to-date summary.
-func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
+func (w *Worker) Summarize(ctx context.Context, conversationID string, requestType string) error {
 	maxPreviousSummaries := 5
 	conv, err := w.Store.FindConversationByID(conversationID)
 	if err != nil {
 		return err
 	}
+
+	// Create Activity Log
+	logID := uuid.NewString()
+	activityLog := &db.ActivityLog{
+		ID:                logID,
+		Type:              "summary",
+		ConversationID:    conv.ID,
+		ConversationTitle: conv.Title,
+		RequestType:       requestType,
+		Status:            "pending",
+	}
+	_ = w.Store.CreateActivityLog(activityLog)
+
 	msgs, err := w.Store.RecentMessages(conversationID, 0)
 	if err != nil {
+		_ = w.Store.UpdateActivityLog(logID, "failure", err.Error(), "")
 		return err
 	}
 	if len(msgs) == 0 {
+		_ = w.Store.UpdateActivityLog(logID, "cancelled", "No messages to summarize", "")
 		return nil
 	}
+
+	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Preparing context...", "")
 
 	// Collect ALL previous summaries oldest-first to build a cumulative context.
 	prevSummaries, _ := w.Store.ListSummaries(conversationID)
@@ -120,22 +138,35 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 		body += fmt.Sprintf("[%s]: %s\n", label, m.Content)
 	}
 
-	prompt := "You are building a memory summary that will be injected into a chat AI system prompt to help it reply naturally as a specific person." + "\n"
-	prompt += "In the messages below, [HOST] is the account owner (the person you are writing for), and [USER] is the person chatting with them." + "\n"
-	prompt += "Your job is NOT to write a story recap and NOT to create a list of topics to redirect the conversation to." + "\n"
-	prompt += "Produce a structured snapshot the AI uses to: sound like the same person, remember what the other person shared, and match the emotional tone." + "\n\n"
-	prompt += "Format your output using exactly these section headers:" + "\n\n"
-	prompt += "**My speaking style:** How does the [HOST] (me) text? Sentence length, vocabulary, humor level, formality, recurring words or phrases, quirks." + "\n\n"
-	prompt += "**Relationship dynamic:** How do the [HOST] and [USER] talk to each other? Flirty, friendly, playful, guarded? What is the vibe and push-pull between us?" + "\n\n"
-	prompt += "**What the USER shared about themselves:** Personal details, feelings, stories, preferences the [USER] mentioned in their messages." + "\n\n"
-	prompt += "**What I (HOST) shared about myself:** Personal details or stories [HOST] mentioned. Be vague where nothing concrete was said." + "\n\n"
-	prompt += "**Recent conversation thread:** 2-3 sentences on what we were just talking about and the emotional direction." + "\n\n"
-	prompt += "**Active context:** Background things to be aware of — NOT topics to redirect to. Just things that might come up naturally." + "\n"
+	prompt := `
+	You are a memory compression assistant for a chat agent.
+
+	## Your Job
+	Read the conversation history below and produce a compact summary that captures everything the agent needs to stay consistent and human in future replies.
+
+	## What to Capture (if present)
+	- The other person's name, age, location, language, and any personal details they shared
+	- Their current emotional state and how the conversation feels (cold, warm, flirty, trusting, etc.)
+	- Key stories, problems, or life events they mentioned
+	- How far the relationship has progressed (just met / building trust / emotionally close / flirting / intimate)
+	- Anything the agent ("HOST") revealed about himself — even vague things
+	- Any topics that were sensitive, avoided, or deflected
+	- The last message sent and the current mood/vibe of the conversation
+
+	## Output Format
+	Write in plain paragraphs. No bullet points, no headers. Write it like briefing notes — dense, factual, third-person.
+
+	## Hard Rules
+	- Never invent or assume facts not present in the conversation
+	- If something is unclear, omit it rather than guess
+	- Do not include filler phrases like "the conversation went well" — only concrete facts and observed signals
+	- Do not summarize what "[HOST]" is — only what happened in THIS conversation
+	`
 
 	if prevContext != "" {
-		prompt += "---" + "\n" + "Previous memory (keep this, update it with new info):" + "\n" + prevContext + "\n"
+		prompt += "\n" + "## Previous Summary (if any)" + "\n" + prevContext + "\n"
 	}
-	prompt += "---" + "\n" + "New messages to incorporate:" + "\n" + body
+	prompt += "\n" + "## Conversation to Summarize" + "\n" + body
 
 	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
 	modelName, _, summaryModel, contextSize := chat.ParseModelConfig(modelValue, chat.DefaultModel)
@@ -153,6 +184,8 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 		finalModel = modelName
 	}
 
+	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Generating summary with "+finalModel, "")
+
 	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
 	apiKey := w.Store.GetConfigValue("llm_key", "")
 	client := w.Engine.NewLLM(baseURL, apiKey)
@@ -162,6 +195,7 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 	}, contextSize)
 	if err != nil {
 		log.Printf("[ERROR] Summarization failed for conversation %s: %v", conversationID, err)
+		_ = w.Store.UpdateActivityLog(logID, "failure", err.Error(), "")
 		return err
 	}
 
@@ -169,15 +203,21 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string) error {
 
 	// Delete old summaries before inserting the new all-inclusive one.
 	if err := w.Store.DeleteAllSummariesForConversation(conversationID); err != nil {
+		_ = w.Store.UpdateActivityLog(logID, "failure", "delete old summaries: "+err.Error(), "")
 		return fmt.Errorf("delete old summaries: %w", err)
 	}
 	if err := w.Store.InsertSummary(&db.Summary{ConversationID: conversationID, Text: reply}); err != nil {
+		_ = w.Store.UpdateActivityLog(logID, "failure", "insert summary: "+err.Error(), "")
 		return err
 	}
 	// Delete ALL messages that were just summarized.
 	if err := w.Store.DeleteAllMessages(conversationID); err != nil {
+		_ = w.Store.UpdateActivityLog(logID, "failure", "delete summarized messages: "+err.Error(), "")
 		return fmt.Errorf("delete summarized messages: %w", err)
 	}
+
+	meta, _ := json.Marshal(stats)
+	_ = w.Store.UpdateActivityLog(logID, "success", "", string(meta))
 	return nil
 }
 

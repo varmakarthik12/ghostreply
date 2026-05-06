@@ -14,6 +14,7 @@ import Settings from "./screens/Settings";
 import SetupScreen from "./screens/SetupScreen";
 import Summaries from "./screens/Summaries";
 import SystemPrompts from "./screens/SystemPrompts";
+import ActivityLogs from "./screens/ActivityLogs";
 
 export default function App() {
   const [screen, setScreen] = useState("dashboard");
@@ -125,6 +126,8 @@ export default function App() {
         return <ModelConfigs />;
       case "summaries":
         return <Summaries />;
+      case "logs":
+        return <ActivityLogs />;
       case "links":
         return <IdentityLinks />;
       case "settings":

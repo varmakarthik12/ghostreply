@@ -75,5 +75,36 @@ CREATE TABLE IF NOT EXISTS system_prompts (
     text     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS server_sessions (
+    id         TEXT PRIMARY KEY,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    stopped_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id                 TEXT PRIMARY KEY,
+    session_id         TEXT NOT NULL,
+    type               TEXT NOT NULL, -- 'engine' or 'summary'
+    conversation_id    TEXT NOT NULL,
+    conversation_title TEXT,
+    request_type       TEXT NOT NULL, -- 'auto_reply', 'manual_summary', 'auto_summary'
+    status             TEXT NOT NULL, -- 'pending', 'success', 'failure', 'cancelled'
+    error_msg          TEXT,
+    metadata           TEXT, -- JSON
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at       DATETIME,
+    FOREIGN KEY(session_id) REFERENCES server_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS operation_stats (
+    session_id TEXT NOT NULL,
+    type       TEXT NOT NULL, -- 'engine' or 'summary'
+    status     TEXT NOT NULL,
+    count      INTEGER DEFAULT 0,
+    PRIMARY KEY(session_id, type, status),
+    FOREIGN KEY(session_id) REFERENCES server_sessions(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_activity_session ON activity_logs(session_id);
 `
