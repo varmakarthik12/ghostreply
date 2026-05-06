@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/llm"
 )
