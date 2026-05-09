@@ -45,10 +45,6 @@ func NewStore(path string) (*Store, error) {
 func (s *Store) Close() error { return s.DB.Close() }
 
 func (s *Store) Migrate() error {
-	// SQLite doesn't support "IF NOT EXISTS" for ADD COLUMN directly in a simple way
-	// We'll just try to add and ignore errors if they already exist,
-	// or check manually. Checking manually is cleaner.
-
 	addColumn := func(table, column, spec string) {
 		_, err := s.DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, spec))
 		if err != nil {
@@ -56,8 +52,6 @@ func (s *Store) Migrate() error {
 				return
 			}
 			log.Printf("[DB] Migrate error on %s.%s: %v", table, column, err)
-		} else {
-			log.Printf("[DB] Successfully added column %s to table %s", column, table)
 		}
 	}
 
@@ -65,6 +59,37 @@ func (s *Store) Migrate() error {
 	addColumn("messages", "sender_id", "TEXT")
 	addColumn("messages", "sender_name", "TEXT")
 	addColumn("configs", "updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
+
+	// Rename webhook_url to endpoint_url in integrations
+	var integrationsSchema string
+	s.DB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='integrations'").Scan(&integrationsSchema)
+	if strings.Contains(integrationsSchema, "webhook_url") && !strings.Contains(integrationsSchema, "endpoint_url") {
+		log.Printf("[DB] Migrating integrations.webhook_url to endpoint_url...")
+		_, err := s.DB.Exec("ALTER TABLE integrations RENAME COLUMN webhook_url TO endpoint_url")
+		if err != nil {
+			log.Printf("[DB] Failed to rename webhook_url: %v", err)
+		}
+	}
+
+	// Migrate identity_links table to new schema
+	var identityLinksSchema string
+	s.DB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='identity_links'").Scan(&identityLinksSchema)
+	if strings.Contains(identityLinksSchema, "platform_user_id") || strings.Contains(identityLinksSchema, "host_user_id") {
+		log.Printf("[DB] Migrating identity_links table to new schema...")
+		tx, err := s.DB.Begin()
+		if err == nil {
+			_, _ = tx.Exec("DROP TABLE identity_links")
+			_, _ = tx.Exec(`CREATE TABLE identity_links (
+				id              TEXT PRIMARY KEY,
+				identity_id     TEXT NOT NULL,
+				conversation_id TEXT NOT NULL,
+				UNIQUE(identity_id, conversation_id)
+			)`)
+			if err := tx.Commit(); err != nil {
+				log.Printf("[DB] Failed to migrate identity_links: %v", err)
+			}
+		}
+	}
 
 	// Migration for configs table UNIQUE constraint
 	var configsSchema string
@@ -85,11 +110,7 @@ func (s *Store) Migrate() error {
 			)`)
 			_, _ = tx.Exec("INSERT INTO configs (id, scope, scope_id, key, value, updated_at) SELECT id, scope, scope_id, key, value, COALESCE(updated_at, CURRENT_TIMESTAMP) FROM configs_old")
 			_, _ = tx.Exec("DROP TABLE configs_old")
-			if err := tx.Commit(); err != nil {
-				log.Printf("[DB] Failed to migrate configs table: %v", err)
-			} else {
-				log.Printf("[DB] Configs table migration successful")
-			}
+			_ = tx.Commit()
 		}
 	}
 
@@ -147,7 +168,7 @@ type Integration struct {
 	Platform   string `json:"platform"`
 	Account    string `json:"account"`
 	Token      string `json:"token"`
-	WebhookURL string `json:"webhook_url"`
+	EndpointURL string `json:"endpoint_url"`
 	Active     int    `json:"active"`
 	CreatedAt  string `json:"created_at"`
 }
@@ -196,9 +217,8 @@ type ModelConfig struct {
 
 type IdentityLink struct {
 	ID             string `json:"id"`
-	HostUserID     string `json:"host_user_id"`
-	Platform       string `json:"platform"`
-	PlatformUserID string `json:"platform_user_id"`
+	IdentityID     string `json:"identity_id"`
+	ConversationID string `json:"conversation_id"`
 }
 
 type SystemPrompt struct {
@@ -238,7 +258,7 @@ type OperationStats struct {
 // ----- Integrations -----
 
 func (s *Store) ListIntegrations() ([]Integration, error) {
-	rows, err := s.DB.Query(`SELECT id, platform, account, COALESCE(token,''), COALESCE(webhook_url,''), active, created_at FROM integrations ORDER BY created_at DESC`)
+	rows, err := s.DB.Query(`SELECT id, platform, account, COALESCE(token,''), COALESCE(endpoint_url,''), active, created_at FROM integrations ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +266,7 @@ func (s *Store) ListIntegrations() ([]Integration, error) {
 	out := []Integration{}
 	for rows.Next() {
 		var i Integration
-		if err := rows.Scan(&i.ID, &i.Platform, &i.Account, &i.Token, &i.WebhookURL, &i.Active, &i.CreatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.Platform, &i.Account, &i.Token, &i.EndpointURL, &i.Active, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -261,14 +281,14 @@ func (s *Store) CreateIntegration(i *Integration) error {
 	if i.Active == 0 {
 		i.Active = 1
 	}
-	_, err := s.DB.Exec(`INSERT INTO integrations (id, platform, account, token, webhook_url, active) VALUES (?,?,?,?,?,?)`,
-		i.ID, i.Platform, i.Account, i.Token, i.WebhookURL, i.Active)
+	_, err := s.DB.Exec(`INSERT INTO integrations (id, platform, account, token, endpoint_url, active) VALUES (?,?,?,?,?,?)`,
+		i.ID, i.Platform, i.Account, i.Token, i.EndpointURL, i.Active)
 	return err
 }
 
 func (s *Store) UpdateIntegration(i *Integration) error {
-	_, err := s.DB.Exec(`UPDATE integrations SET platform=?, account=?, token=?, webhook_url=?, active=? WHERE id=?`,
-		i.Platform, i.Account, i.Token, i.WebhookURL, i.Active, i.ID)
+	_, err := s.DB.Exec(`UPDATE integrations SET platform=?, account=?, token=?, endpoint_url=?, active=? WHERE id=?`,
+		i.Platform, i.Account, i.Token, i.EndpointURL, i.Active, i.ID)
 	return err
 }
 
@@ -278,9 +298,9 @@ func (s *Store) DeleteIntegration(id string) error {
 }
 
 func (s *Store) GetActiveIntegrationByPlatform(platform string) (*Integration, error) {
-	row := s.DB.QueryRow(`SELECT id, platform, account, COALESCE(token,''), COALESCE(webhook_url,''), active, created_at FROM integrations WHERE platform=? AND active=1 LIMIT 1`, platform)
+	row := s.DB.QueryRow(`SELECT id, platform, account, COALESCE(token,''), COALESCE(endpoint_url,''), active, created_at FROM integrations WHERE platform=? AND active=1 LIMIT 1`, platform)
 	var i Integration
-	if err := row.Scan(&i.ID, &i.Platform, &i.Account, &i.Token, &i.WebhookURL, &i.Active, &i.CreatedAt); err != nil {
+	if err := row.Scan(&i.ID, &i.Platform, &i.Account, &i.Token, &i.EndpointURL, &i.Active, &i.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &i, nil
@@ -682,19 +702,34 @@ func (s *Store) ResolveModel(conversationID, integrationID, defaultModel string)
 
 // ----- Identity Links -----
 
-func (s *Store) ListIdentityLinks() ([]IdentityLink, error) {
-	rows, err := s.DB.Query(`SELECT id, host_user_id, platform, platform_user_id FROM identity_links ORDER BY host_user_id`)
+func (s *Store) ListIdentityLinks() ([]map[string]interface{}, error) {
+	q := `
+		SELECT il.id, il.identity_id, il.conversation_id, c.title, c.external_id, i.platform, i.account
+		FROM identity_links il
+		JOIN conversations c ON il.conversation_id = c.id
+		JOIN integrations i ON c.integration_id = i.id
+		ORDER BY il.identity_id
+	`
+	rows, err := s.DB.Query(q)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []IdentityLink{}
+	out := []map[string]interface{}{}
 	for rows.Next() {
-		var l IdentityLink
-		if err := rows.Scan(&l.ID, &l.HostUserID, &l.Platform, &l.PlatformUserID); err != nil {
+		var id, identityID, conversationID, title, externalID, platform, account string
+		if err := rows.Scan(&id, &identityID, &conversationID, &title, &externalID, &platform, &account); err != nil {
 			return nil, err
 		}
-		out = append(out, l)
+		out = append(out, map[string]interface{}{
+			"id":              id,
+			"identity_id":     identityID,
+			"conversation_id": conversationID,
+			"title":           title,
+			"external_id":     externalID,
+			"platform":        platform,
+			"account":         account,
+		})
 	}
 	return out, nil
 }
@@ -703,14 +738,52 @@ func (s *Store) CreateIdentityLink(l *IdentityLink) error {
 	if l.ID == "" {
 		l.ID = uuid.NewString()
 	}
-	_, err := s.DB.Exec(`INSERT INTO identity_links (id, host_user_id, platform, platform_user_id) VALUES (?,?,?,?)`,
-		l.ID, l.HostUserID, l.Platform, l.PlatformUserID)
+	_, err := s.DB.Exec(`INSERT INTO identity_links (id, identity_id, conversation_id) VALUES (?,?,?)`,
+		l.ID, l.IdentityID, l.ConversationID)
 	return err
 }
 
 func (s *Store) DeleteIdentityLink(id string) error {
 	_, err := s.DB.Exec(`DELETE FROM identity_links WHERE id=?`, id)
 	return err
+}
+
+func (s *Store) GetLinkedSummaries(conversationID string) ([]Summary, error) {
+	var identityID string
+	err := s.DB.QueryRow(`SELECT identity_id FROM identity_links WHERE conversation_id=?`, conversationID).Scan(&identityID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Not linked
+		}
+		return nil, err
+	}
+
+	// Find all conversations for this identity
+	rows, err := s.DB.Query(`SELECT conversation_id FROM identity_links WHERE identity_id=?`, identityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var convIDs []string
+	for rows.Next() {
+		var cid string
+		if err := rows.Scan(&cid); err == nil {
+			convIDs = append(convIDs, cid)
+		}
+	}
+
+	var summaries []Summary
+	for _, cid := range convIDs {
+		// Get latest summary for each linked conversation
+		q := `SELECT id, conversation_id, text, created_at FROM summaries WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1`
+		var sm Summary
+		if err := s.DB.QueryRow(q, cid).Scan(&sm.ID, &sm.ConversationID, &sm.Text, &sm.CreatedAt); err == nil {
+			summaries = append(summaries, sm)
+		}
+	}
+
+	return summaries, nil
 }
 
 // ----- System prompts -----

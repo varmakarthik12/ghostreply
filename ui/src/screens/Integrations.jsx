@@ -15,7 +15,7 @@ function IntegrationForm({ init, onSave, onCancel }) {
     platform: "",
     account: "",
     token: "",
-    webhook_url: "",
+    endpoint_url: "",
     active: 1,
     ...init,
   });
@@ -67,10 +67,10 @@ function IntegrationForm({ init, onSave, onCancel }) {
           placeholder="Platform API token (optional)"
         />
       </Field>
-      <Field label="Webhook URL">
+      <Field label="Endpoint URL">
         <input
-          value={f.webhook_url}
-          onChange={(e) => setF({ ...f, webhook_url: e.target.value })}
+          value={f.endpoint_url}
+          onChange={(e) => setF({ ...f, endpoint_url: e.target.value })}
           placeholder="https://… (optional)"
         />
       </Field>

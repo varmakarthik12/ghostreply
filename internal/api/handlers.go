@@ -100,7 +100,7 @@ func decodeBody(r *http.Request, v interface{}) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
-// ----- webhook -----
+// ----- auto-reply -----
 
 func (a *API) autoReply(w http.ResponseWriter, r *http.Request) {
 	integrationID := chi.URLParam(r, "integrationID")

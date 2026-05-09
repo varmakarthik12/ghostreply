@@ -1,143 +1,140 @@
 # 👻 GhostReply
 
-GhostReply is an autonomous AI agent that monitors your messaging and conversation accounts and replies on your behalf — in your voice. You define a persona (your tone, style, background, and boundaries), connect an LLM backend, and GhostReply takes over: reading incoming messages and composing responses that sound like you.
+[![Go Report Card](https://goreportcard.com/badge/github.com/varmakarthik12/ghostreply)](https://goreportcard.com/report/github.com/varmakarthik12/ghostreply)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://img.shields.io/github/v/release/varmakarthik12/ghostreply)](https://github.com/varmakarthik12/ghostreply/releases)
+
+**GhostReply** is a powerful, autonomous AI agent designed to manage your messaging conversations with human-like precision. It doesn't just "reply"—it learns your voice, remembers your past interactions, and maintains the context of your relationships across time.
+
+Built for privacy-conscious users, GhostReply runs locally or on your own server, connecting your favorite messaging platforms to local LLMs (via Ollama) or cloud providers.
 
 ---
 
-## Install
+## ✨ Key Features
 
-### Prerequisites
+- 🧠 **Infinite Memory**: Automatically summarizes long conversations into high-level "background memory," ensuring the AI stays consistent with your past shared experiences.
+- 🎭 **Persona Engine**: Define your tone, quirks, and background. GhostReply stays in character, matching your texting style (brief, detailed, casual, etc.).
+- 📉 **Smart Context Management**: Automatically prunes old messages after summarizing them, keeping your LLM context windows lean and fast without losing "knowledge."
+- 🛡️ **Spam Protection**: Configurable guards to prevent the assistant from sending too many consecutive messages or getting caught in loops.
+- 📊 **Operations Dashboard**: A beautiful, real-time UI to monitor every interaction, view token usage, and manually cancel in-progress replies.
+- 🔗 **Unified Identity**: Link the same user across multiple platforms (e.g. Telegram, Discord, WhatsApp). GhostReply shares memory between these conversations, acting like a real person who remembers you everywhere.
+- 🔌 **Agnostic Integration**: Simple HTTP API makes it easy to bridge with any messaging proxy.
 
-- Go 1.22+ (`brew install go` / `apt install golang`)
-- GCC (`brew install gcc` / `apt install gcc`) — required for SQLite (CGO)
+---
 
-### Build from source
+## 🚀 Installation
 
+### 1. Using Homebrew
+Install GhostReply via our official tap:
+```bash
+brew tap varmakarthik12/ghostreply https://github.com/varmakarthik12/ghostreply
+brew install ghostreply
+```
+
+### 2. Using Go Install
+If you have Go installed, you can install the binary directly:
+```bash
+go install github.com/varmakarthik12/ghostreply/cmd/ghostreply@latest
+```
+*Note: This requires the UI assets to be pre-built in the repository.*
+
+### 3. Build from Source
+Perfect for developers who want the latest features:
 ```bash
 git clone https://github.com/varmakarthik12/ghostreply.git
 cd ghostreply
 
-# 1. Build the React UI (required before go build)
+# 1. Build the React UI
 cd ui && npm install && npm run build && cd ..
 
-# 2. Build the Go binary (embeds the UI)
+# 2. Build the Go binary
 go build -o ghostreply ./cmd/ghostreply
 ```
 
-### Run
+---
 
-```bash
-./ghostreply
-```
+## 🛠️ Getting Started
 
-The database is created automatically at `~/.ghostreply/ghostreply.db` if `--db-path` is not given. On startup you'll see:
-
-```
-=== GhostReply ===
-Token: 94194AB36A...
-Port:  8080
-DB:    /Users/you/.ghostreply/ghostreply.db  (default)
-LLM:   http://localhost:11434
-Open   http://localhost:8080
-```
-
-Open **http://localhost:8080** and paste the token to log in. The same token is reused on restart as long as the database file exists (it is stored there).
+1. **Launch**: Run `./ghostreply`.
+2. **Access**: Open **http://localhost:8080** in your browser.
+3. **Login**: Use the auto-generated token displayed in your terminal.
+4. **Configure**:
+   - **Integrations**: Define where the messages are coming from.
+   - **Personas**: Write a detailed "System Prompt" describing who you are.
+   - **Models**: Connect to Ollama (default) or OpenAI-compatible APIs.
 
 ---
 
-## Flags
+## 🔌 API Integration
 
-| Flag        | Required | Description                                                              |
-| ----------- | -------- | ------------------------------------------------------------------------ |
-| `--db-path` | no       | SQLite file path. Default: `~/.ghostreply/ghostreply.db` (auto-created) |
-| `--port`    | no       | HTTP port (default `8080`)                                               |
-| `--llm-url` | no       | LLM endpoint (default `http://localhost:11434`)                          |
-| `--token`   | no       | Override the auto-generated API token                                    |
+GhostReply is designed to sit behind a messaging proxy. To trigger an auto-reply, your proxy should POST to the API endpoint.
 
-### Environment variables
+### Endpoint
+`POST /api/integrations/{integration_id}/conversations/{external_id}/auto-reply`
 
-| Variable           | Description                                               |
-| ------------------ | --------------------------------------------------------- |
-| `GHOSTREPLY_TOKEN` | Alternative to `--token`                                  |
-| `LLM_KEY`          | API key for OpenAI-compatible endpoints                   |
-| `OPENAI_API_KEY`   | Backwards-compatible alias for `LLM_KEY`                  |
-
----
-
-## Quick setup (after opening the UI)
-
-1. **Integrations** → Add an integration (platform name + account label)
-2. **System Prompts** → Write a persona (e.g. _"You are Alex, a 28-year-old dev. Reply casually and briefly."_)
-3. **Model Configs** → Set the model (e.g. `llama3.2` or `gpt-4o`)
-4. **Chat Test** → Select the integration, enter a Chat ID, send a message — see the reply
-
----
-
-## Webhook
-
-Your messaging proxy should POST to:
-
-```
-POST http://localhost:8080/api/webhook
-Content-Type: application/json
-
-{"text": "hey what's up", "platform": "telegram", "chat_id": "user123"}
-```
-
-Response:
-
+### Request Schema
 ```json
-{ "reply": "not much, you?" }
+{
+  "integration_id": "your-integration-uuid",
+  "conversation_id": "unique-room-id",
+  "content": "The incoming message text",
+  "sender_id": "user-123",
+  "sender_name": "John Doe",
+  "chat_type": "private",
+  "timestamp": "2026-05-09T10:00:00Z",
+  "message_id": "msg-999",
+  "history": [
+    {
+      "content": "Previous message",
+      "sender_id": "assistant",
+      "is_outbound": true,
+      "timestamp": "2026-05-09T09:55:00Z"
+    }
+  ]
+}
 ```
 
-The webhook endpoint is **unauthenticated** — it is designed to be called by your internal proxy only.
+### Response
+```json
+{
+  "reply": "Hey John! I'll look into that for you."
+}
+```
 
 ---
 
-## LLM backends
+## 🧠 How Memory & Summaries Work
 
-**Ollama (default)**
+GhostReply solves the "context window" problem by using a background worker that monitors your conversations.
 
-```bash
-# Install: https://ollama.com
-ollama pull llama3.2
-./ghostreply
-```
-
-**OpenAI-compatible API**
-
-```bash
-LLM_KEY=sk-... ./ghostreply --llm-url https://api.openai.com
-```
-
-Then set model to `gpt-4o` in Model Configs.
+1. **Threshold Trigger**: When a conversation hits your set limit (e.g., 50 messages), the worker wakes up.
+2. **Recursive Summarization**: It takes all previous summaries and the newest batch of messages to create a fresh, consolidated "Background Memory."
+3. **Pruning**: Once summarized, the old messages are deleted from the database, and old summaries are replaced.
+4. **Injection**: The next time you get a message, this "Background Memory" is injected into the LLM prompt, allowing the agent to remember things you said weeks ago without wasting tokens on every single previous text.
 
 ---
 
-## How summaries work
+## 🔗 Cross-Platform Unified Memory
 
-The background worker runs every 5 minutes. When a conversation exceeds the `summary_threshold` (default 50 messages) or `token_threshold` (default 4000 tokens), it:
+GhostReply can link multiple conversations across different integrations to a single "Unified Identity." This allows the AI to maintain a shared memory of a person even if you talk to them on Discord, Telegram, and WhatsApp.
 
-1. Collects all previous summaries (oldest → newest) to build full context
-2. Generates one new summary that incorporates everything
-3. **Deletes all old summaries** (the new one contains them all)
-4. **Deletes all summarized messages** from the database
-
-The result is always a single, up-to-date summary per conversation plus only the most recent messages — keeping the LLM context lean without losing history.
+### How to set it up:
+1. Go to the **Unified Identities** screen in the dashboard.
+2. Click **+ Link Conversation**.
+3. Type an **Identity Name** (e.g., `Alex Smith`).
+4. Select a conversation from the searchable list (linked to any integration).
+5. Repeat for Alex's other accounts on different platforms.
+6. Now, when you chat with Alex on any of these platforms, GhostReply pulls in the combined history and summaries from all of them.
 
 ---
 
-## Development
+## 🤝 Contributing
 
-```bash
-# Run Go tests
-CGO_ENABLED=1 go test ./...
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
-# UI hot-reload (requires running Go server on :8080)
-cd ui && npm run dev
-# → opens http://localhost:5173 with API requests proxied to :8080
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-# Rebuild UI and Go binary
-cd ui && npm run build && cd ..
-go build -o ghostreply ./cmd/ghostreply
-```

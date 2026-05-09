@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS integrations (
     platform    TEXT NOT NULL,
     account     TEXT NOT NULL,
     token       TEXT,
-    webhook_url TEXT,
+    endpoint_url TEXT,
     active      INTEGER DEFAULT 1,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -61,11 +61,10 @@ CREATE TABLE IF NOT EXISTS model_configs (
 );
 
 CREATE TABLE IF NOT EXISTS identity_links (
-    id               TEXT PRIMARY KEY,
-    host_user_id     TEXT NOT NULL,
-    platform         TEXT NOT NULL,
-    platform_user_id TEXT NOT NULL,
-    UNIQUE(platform, platform_user_id)
+    id              TEXT PRIMARY KEY,
+    identity_id     TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    UNIQUE(identity_id, conversation_id)
 );
 
 CREATE TABLE IF NOT EXISTS system_prompts (

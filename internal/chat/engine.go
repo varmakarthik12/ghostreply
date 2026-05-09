@@ -73,13 +73,13 @@ type HistoryMessage struct {
 	MessageID  string `json:"message_id"`
 }
 
-type WebhookResponse struct {
+type AutoReplyResponse struct {
 	Reply string `json:"reply"`
 }
 
 var ErrIntegrationNotFound = errors.New("integration not found")
 
-func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*WebhookResponse, error) {
+func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*AutoReplyResponse, error) {
 	// 1. Sync conversation
 	conv, err := e.Store.FindConversation(req.IntegrationID, req.ConversationID)
 	if err != nil {
@@ -214,7 +214,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 				log.Printf("[DEBUG] Skipping auto-reply: maximum consecutive assistant messages reached (%d)", maxConsecutive)
 			}
 			_ = e.Store.UpdateActivityLog(logID, "cancelled", "Max consecutive assistant messages reached", "")
-			return &WebhookResponse{Reply: ""}, nil
+			return &AutoReplyResponse{Reply: ""}, nil
 		}
 	}
 
@@ -226,9 +226,20 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		_ = e.Store.UpdateActivityLog(logID, "failure", err.Error(), "")
 		return nil, fmt.Errorf("recent messages: %w", err)
 	}
+	summaries, _ := e.Store.GetLinkedSummaries(conv.ID)
+	// If no linked summaries found via identity mapping, fallback to the current conversation's summary
+	if len(summaries) == 0 {
+		if sm, err := e.Store.LatestSummary(conv.ID); err == nil && sm != nil {
+			summaries = append(summaries, *sm)
+		}
+	}
+
 	summaryText := ""
-	if sm, err := e.Store.LatestSummary(conv.ID); err == nil && sm != nil {
-		summaryText = sm.Text
+	for _, sm := range summaries {
+		if summaryText != "" {
+			summaryText += "\n---\n"
+		}
+		summaryText += sm.Text
 	}
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
 	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
@@ -266,7 +277,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 
 	if summaryText != "" {
 		system += "## Background memory" + "\n"
-		system += "This gives you context about the person and how the conversation has been going. Use it to stay consistent — your voice, your past, the vibe between you. Do NOT use this as an agenda. Do NOT redirect the conversation back to anything listed here. Just be aware of it." + "\n"
+		system += "This gives you context about the person across one or more platforms. Use it to stay consistent — your voice, your shared history, and the established vibe. Even if this memory comes from a different platform, it is the same person. Do NOT use this as an agenda. Just be aware of it." + "\n"
 		system += "- My speaking style: copy it exactly. Rhythm, vocab, quirks." + "\n"
 		system += "- Relationship dynamic: match the emotional energy." + "\n"
 		system += "- What they've shared: remember it. Bring it up only if it fits naturally." + "\n"
@@ -329,7 +340,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 	meta, _ := json.Marshal(stats)
 	_ = e.Store.UpdateActivityLog(logID, "success", "", string(meta))
 
-	resp := &WebhookResponse{Reply: reply}
+	resp := &AutoReplyResponse{Reply: reply}
 	if debugEnabled {
 		respJSON, _ := json.MarshalIndent(resp, "", "  ")
 		log.Printf("[DEBUG] AutoReply Response (Integration: %s, Conv: %s):\n%s", req.IntegrationID, req.ConversationID, string(respJSON))

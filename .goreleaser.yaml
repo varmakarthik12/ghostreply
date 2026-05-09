@@ -1,6 +1,5 @@
-# This is a sample .goreleaser.yaml file.
-# You can find more documentation at https://goreleaser.com
 version: 2
+project_name: ghostreply
 
 before:
   hooks:
