@@ -1,7 +1,5 @@
 # 👻 GhostReply
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/varmakarthik12/ghostreply)](https://goreportcard.com/report/github.com/varmakarthik12/ghostreply)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://img.shields.io/github/v/release/varmakarthik12/ghostreply)](https://github.com/varmakarthik12/ghostreply/releases)
 
 **GhostReply** is a powerful, autonomous AI agent designed to manage your messaging conversations with human-like precision. It doesn't just "reply"—it learns your voice, remembers your past interactions, and maintains the context of your relationships across time.
