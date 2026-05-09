@@ -14,7 +14,7 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
   const [f, setF] = useState({
     identity_id: "",
     integration_id: "",
-    conversation_id: "",
+    conversation_ids: [],
   });
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -25,12 +25,11 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
   }, [existingLinks]);
 
   const filteredConvs = useMemo(() => {
-    if (!f.integration_id) return [];
     const s = search.toLowerCase();
-    // Filter out conversations already linked
     const linkedIds = existingLinks.map((l) => l.conversation_id);
     return conversations.filter((c) => {
-      if (c.integration_id !== f.integration_id) return false;
+      if (f.integration_id && c.integration_id !== f.integration_id)
+        return false;
       if (linkedIds.includes(c.id)) return false;
       return (
         c.title?.toLowerCase().includes(s) ||
@@ -40,22 +39,43 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
   }, [conversations, search, existingLinks, f.integration_id]);
 
   async function save() {
-    if (!f.identity_id || !f.conversation_id) {
-      setErr("Please provide an Identity ID and select a conversation.");
+    if (!f.identity_id || f.conversation_ids.length === 0) {
+      setErr("Please provide an Identity ID and select at least one conversation.");
       return;
     }
     setSaving(true);
     setErr("");
     try {
-      await apiPost("/identity-links", {
-        identity_id: f.identity_id,
-        conversation_id: f.conversation_id,
-      });
+      for (const convId of f.conversation_ids) {
+        await apiPost("/identity-links", {
+          identity_id: f.identity_id,
+          conversation_id: convId,
+        });
+      }
       onSave();
     } catch (e) {
       setErr(e.message);
     }
     setSaving(false);
+  }
+
+  function toggleConv(id) {
+    if (f.conversation_ids.includes(id)) {
+      setF({
+        ...f,
+        conversation_ids: f.conversation_ids.filter((x) => x !== id),
+      });
+    } else {
+      setF({ ...f, conversation_ids: [...f.conversation_ids, id] });
+    }
+  }
+
+  function toggleAll() {
+    if (f.conversation_ids.length === filteredConvs.length) {
+      setF({ ...f, conversation_ids: [] });
+    } else {
+      setF({ ...f, conversation_ids: filteredConvs.map((c) => c.id) });
+    }
   }
 
   return (
@@ -79,95 +99,123 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
         </datalist>
       </Field>
 
-      <Field label="Select Integration">
-        <select
-          value={f.integration_id}
-          onChange={(e) =>
-            setF({ ...f, integration_id: e.target.value, conversation_id: "" })
-          }
-        >
-          <option value="">Choose an integration…</option>
-          {integrations.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.platform} · {i.account}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {f.integration_id && (
-        <>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Filter by Integration">
+            <select
+              value={f.integration_id}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  integration_id: e.target.value,
+                })
+              }
+            >
+              <option value="">All Integrations</option>
+              {integrations.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.platform} · {i.account}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
           <Field label="Search Conversation">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter by title or external ID…"
+              placeholder="Title or ID…"
             />
           </Field>
+        </div>
+      </div>
 
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>
+          {filteredConvs.length} available · {f.conversation_ids.length} selected
+        </span>
+        {filteredConvs.length > 0 && (
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={toggleAll}
+            type="button"
+          >
+            {f.conversation_ids.length === filteredConvs.length
+              ? "Deselect All"
+              : "Select All Filtered"}
+          </button>
+        )}
+      </div>
+
+      <div
+        style={{
+          maxHeight: 250,
+          overflowY: "auto",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          marginBottom: 20,
+        }}
+      >
+        {filteredConvs.length === 0 ? (
           <div
             style={{
-              maxHeight: 200,
-              overflowY: "auto",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              marginBottom: 20,
+              padding: 24,
+              color: "var(--muted)",
+              textAlign: "center",
             }}
           >
-            {filteredConvs.length === 0 ? (
-              <div
-                style={{
-                  padding: 12,
-                  color: "var(--muted)",
-                  textAlign: "center",
-                }}
-              >
-                No unlinked conversations in this integration
-              </div>
-            ) : (
-              filteredConvs.map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => setF({ ...f, conversation_id: c.id })}
-                  style={{
-                    padding: "8px 12px",
-                    cursor: "pointer",
-                    backgroundColor:
-                      f.conversation_id === c.id
-                        ? "var(--bg-hover)"
-                        : "transparent",
-                    borderBottom: "1px solid var(--border)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    checked={f.conversation_id === c.id}
-                    readOnly
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600 }}>
-                      {c.title || "Untitled"}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                      {c.external_id}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
+            No unlinked conversations found
           </div>
-        </>
-      )}
+        ) : (
+          filteredConvs.map((c) => (
+            <div
+              key={c.id}
+              onClick={() => toggleConv(c.id)}
+              style={{
+                padding: "10px 12px",
+                cursor: "pointer",
+                backgroundColor: f.conversation_ids.includes(c.id)
+                  ? "var(--bg-hover)"
+                  : "transparent",
+                borderBottom: "1px solid var(--border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={f.conversation_ids.includes(c.id)}
+                readOnly
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600 }}>
+                  {c.title || "Untitled"}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", display: 'flex', gap: 8 }}>
+                  <span style={{ color: 'var(--accent)' }}>{c.platform}</span>
+                  <span>{c.external_id}</span>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
 
       <div className="modal-footer">
         <button className="btn btn-secondary" onClick={onCancel}>
           Cancel
         </button>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? <Spinner /> : null} Create Mapping
+          {saving ? <Spinner /> : null} Create {f.conversation_ids.length > 1 ? `${f.conversation_ids.length} Mappings` : 'Mapping'}
         </button>
       </div>
     </>
