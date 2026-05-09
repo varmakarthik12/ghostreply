@@ -17,7 +17,7 @@ Built for privacy-conscious users, GhostReply runs locally or on your own server
 - 📉 **Smart Context Management**: Automatically prunes old messages after summarizing them, keeping your LLM context windows lean and fast without losing "knowledge."
 - 🛡️ **Spam Protection**: Configurable guards to prevent the assistant from sending too many consecutive messages or getting caught in loops.
 - 📊 **Operations Dashboard**: A beautiful, real-time UI to monitor every interaction, view token usage, and manually cancel in-progress replies.
-- 🔗 **Unified Identity**: Link the same user across multiple platforms (e.g. Telegram, Discord, WhatsApp). GhostReply shares memory between these conversations, acting like a real person who remembers you everywhere.
+- 🔗 **Unified Identity (Cross-Platform Memory)**: Link multiple accounts across different platforms (e.g., Telegram, Discord, WhatsApp) to a single person. GhostReply aggregates summaries from all linked conversations so the AI remembers your shared history regardless of the platform.
 - 🔌 **Agnostic Integration**: Simple HTTP API makes it easy to bridge with any messaging proxy.
 
 ---
