@@ -1,6 +1,6 @@
 # 👻 GhostReply
 
-An AI agent that **impersonates a human host** across messaging, conversation platforms. When someone messages the host's account, GhostReply replies automatically — in the host's voice — using a persona you define and an LLM backend.
+GhostReply is an autonomous AI agent that monitors your messaging and conversation accounts and replies on your behalf — in your voice. You define a persona (your tone, style, background, and boundaries), connect an LLM backend, and GhostReply takes over: reading incoming messages and composing responses that sound like you.
 
 ---
 
