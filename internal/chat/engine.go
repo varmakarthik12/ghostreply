@@ -33,7 +33,12 @@ type Engine struct {
 	NewLLM LLMClientFactory
 
 	// Track active requests per conversation for cancellation
-	activeRequests sync.Map // map[string]context.CancelFunc
+	activeRequests sync.Map // map[string]activeRequest
+}
+
+type activeRequest struct {
+	cancel context.CancelFunc
+	logID  string
 }
 
 func NewEngine(store *db.Store, llmURL string, factory LLMClientFactory) *Engine {
@@ -75,22 +80,7 @@ type WebhookResponse struct {
 var ErrIntegrationNotFound = errors.New("integration not found")
 
 func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*WebhookResponse, error) {
-	// 1. Cancellation logic: cancel previous request for this conversation
-	convKey := req.IntegrationID + ":" + req.ConversationID
-	ctx, cancel := context.WithCancel(ctx)
-	if oldCancel, loaded := e.activeRequests.LoadOrStore(convKey, cancel); loaded {
-		oldCancel.(context.CancelFunc)()
-		e.activeRequests.Store(convKey, cancel)
-	}
-	defer e.activeRequests.Delete(convKey)
-
-	debugEnabled := e.Store.GetConfigValue("debug_auto_reply", "false") == "true"
-	if debugEnabled {
-		reqJSON, _ := json.MarshalIndent(req, "", "  ")
-		log.Printf("[DEBUG] AutoReply Request (Integration: %s, Conv: %s):\n%s", req.IntegrationID, req.ConversationID, string(reqJSON))
-	}
-
-	// 2. Sync conversation
+	// 1. Sync conversation
 	conv, err := e.Store.FindConversation(req.IntegrationID, req.ConversationID)
 	if err != nil {
 		conv = &db.Conversation{
@@ -107,7 +97,45 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		_ = e.Store.CreateConversation(conv)
 	}
 
-	// 4. Sync History if provided
+	// 2. Create Activity Log
+	logID := uuid.NewString()
+	activityLog := &db.ActivityLog{
+		ID:                logID,
+		Type:              "engine",
+		ConversationID:    conv.ID,
+		ConversationTitle: conv.Title,
+		RequestType:       "auto_reply",
+		Status:            "pending",
+	}
+	_ = e.Store.CreateActivityLog(activityLog)
+
+	// 3. Cancellation logic: cancel previous request for this conversation
+	convKey := req.IntegrationID + ":" + req.ConversationID
+	ctx, cancel := context.WithCancel(ctx)
+	newAR := activeRequest{cancel: cancel, logID: logID}
+	if old, loaded := e.activeRequests.LoadOrStore(convKey, newAR); loaded {
+		oldAR := old.(activeRequest)
+		oldAR.cancel()
+		// Mark superseded log as cancelled immediately
+		_ = e.Store.UpdateActivityLog(oldAR.logID, "cancelled", "Superseded by a new request", "")
+		e.activeRequests.Store(convKey, newAR)
+	}
+	defer func() {
+		// Only delete if it's still our request
+		if val, ok := e.activeRequests.Load(convKey); ok {
+			if ar, ok := val.(activeRequest); ok && ar.logID == logID {
+				e.activeRequests.Delete(convKey)
+			}
+		}
+	}()
+
+	debugEnabled := e.Store.GetConfigValue("debug_auto_reply", "false") == "true"
+	if debugEnabled {
+		reqJSON, _ := json.MarshalIndent(req, "", "  ")
+		log.Printf("[DEBUG] AutoReply Request (Integration: %s, Conv: %s):\n%s", req.IntegrationID, req.ConversationID, string(reqJSON))
+	}
+
+	// 4. Sync message history
 	for _, hm := range req.History {
 		isOutbound := 0
 		if hm.IsOutbound {
@@ -142,7 +170,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		}
 	}
 
-	// 3. Process current message
+	// 5. Process current message
 	hashKey := req.MessageID
 	if hashKey == "" {
 		hashKey = req.Timestamp
@@ -166,19 +194,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		}
 	}
 
-	// Create Activity Log
-	logID := uuid.NewString()
-	activityLog := &db.ActivityLog{
-		ID:                logID,
-		Type:              "engine",
-		ConversationID:    conv.ID,
-		ConversationTitle: conv.Title,
-		RequestType:       "auto_reply",
-		Status:            "pending",
-	}
-	_ = e.Store.CreateActivityLog(activityLog)
-
-	// 5. Spam Prevention: Check consecutive assistant messages
+	// 6. Spam Prevention: Check consecutive assistant messages
 	maxConsecutive := atoiDefault(e.Store.ResolveConfig(conv.ID, req.IntegrationID, "max_consecutive_assistant_messages", "0"), 0)
 	if maxConsecutive > 0 {
 		recentForSpam, _ := e.Store.RecentMessages(conv.ID, maxConsecutive)
@@ -202,7 +218,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*We
 		}
 	}
 
-	// 4. Generate Reply (reuse logic)
+	// 7. Generate Reply
 	// Build prompt
 	maxN := atoiDefault(e.Store.ResolveConfig(conv.ID, req.IntegrationID, "max_context_messages", "20"), 20)
 	recent, err := e.Store.RecentMessages(conv.ID, maxN)
