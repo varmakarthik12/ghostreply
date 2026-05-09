@@ -48,14 +48,3 @@ changelog:
 
 release:
   draft: true
-
-brews:
-  - repository:
-      owner: varmakarthik12
-      name: ghostreply
-    directory: Formula
-    homepage: "https://github.com/varmakarthik12/ghostreply"
-    description: "Cross-Platform Unified Identity AI Agent"
-    license: "MIT"
-    install: |
-      bin.install "ghostreply"

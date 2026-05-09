@@ -24,21 +24,14 @@ Built for privacy-conscious users, GhostReply runs locally or on your own server
 
 ## 🚀 Installation
 
-### 1. Using Homebrew
-Install GhostReply via our official tap:
-```bash
-brew tap varmakarthik12/ghostreply https://github.com/varmakarthik12/ghostreply
-brew install ghostreply
-```
-
-### 2. Using Go Install
+### 1. Using Go Install
 If you have Go installed, you can install the binary directly:
 ```bash
 go install github.com/varmakarthik12/ghostreply/cmd/ghostreply@latest
 ```
 *Note: This requires the UI assets to be pre-built in the repository.*
 
-### 3. Build from Source
+### 2. Build from Source
 Perfect for developers who want the latest features:
 ```bash
 git clone https://github.com/varmakarthik12/ghostreply.git
