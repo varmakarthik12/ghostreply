@@ -60,8 +60,12 @@ jobs:
             echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag $NEW_TAG
-            git push origin $NEW_TAG
+            if git rev-parse $NEW_TAG >/dev/null 2>&1; then
+              echo "Tag $NEW_TAG already exists, skipping push"
+            else
+              git tag $NEW_TAG
+              git push origin $NEW_TAG || echo "Warning: Failed to push tag $NEW_TAG"
+            fi
           fi
 
   release:
