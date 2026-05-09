@@ -6,12 +6,13 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  pull_request_review:
+    types: [submitted, edited]
   release:
     types: [published]
 
 jobs:
   build:
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +22,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
           cache: true
 
-      - name: Test
+      - name: Run Tests
         run: go test -v -coverprofile=coverage.out $(go list ./... | grep -v /cmd/)
+
+      - name: Build Check (Snapshot)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --snapshot --clean
