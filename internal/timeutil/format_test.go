@@ -30,7 +30,7 @@ func TestFormatAge(t *testing.T) {
 		{
 			name:     "Days ago",
 			sentAt:   now.Add(-48 * time.Hour),
-			expected: "2 day(s) ago (sent Monday Oct 8, 12:00)",
+			expected: "2 day(s) ago (sent Sunday Oct 8, 12:00)",
 		},
 		{
 			name:     "Future",

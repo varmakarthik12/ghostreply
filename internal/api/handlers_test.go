@@ -22,6 +22,10 @@ func (s *stubLLM) Chat(_ context.Context, _ string, _ []llm.Message, _ int) (str
 	return s.Reply, llm.Stats{}, nil
 }
 
+func (s *stubLLM) ListModels(_ context.Context) ([]string, error) {
+	return []string{"llama3.2"}, nil
+}
+
 func newTestServer(t *testing.T) (*API, http.Handler) {
 	t.Helper()
 	store, err := db.NewStore(":memory:")
@@ -194,11 +198,13 @@ func TestModelConfigsAndConfigs(t *testing.T) {
 func TestIdentityLinksCRUD(t *testing.T) {
 	_, h := newTestServer(t)
 	rr := do(t, h, "POST", "/api/identity-links",
-		map[string]string{"host_user_id": "alex", "platform": "telegram", "platform_user_id": "@a"}, testToken)
+		map[string]string{"identity_id": "alex", "conversation_id": "conv123"}, testToken)
 	if rr.Code != http.StatusCreated {
-		t.Fatal(rr.Body.String())
+		t.Fatalf("create link: %d %s", rr.Code, rr.Body.String())
 	}
-	var l db.IdentityLink
+	var l struct {
+		ID string `json:"id"`
+	}
 	json.Unmarshal(rr.Body.Bytes(), &l)
 	rr = do(t, h, "DELETE", "/api/identity-links/"+l.ID, nil, testToken)
 	if rr.Code != http.StatusNoContent {

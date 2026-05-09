@@ -15,6 +15,10 @@ func (m *mockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, co
 	return "mock reply", llm.Stats{}, nil
 }
 
+func (m *mockLLM) ListModels(ctx context.Context) ([]string, error) {
+	return []string{"llama3.2"}, nil
+}
+
 func TestDeduplication(t *testing.T) {
 	dbPath := "test_dedup.db"
 	os.Remove(dbPath)
