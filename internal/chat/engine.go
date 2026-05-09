@@ -20,7 +20,7 @@ const DefaultModel = "llama3.2"
 
 // LLMClientFactory builds an LLM client from a base URL and API key.
 // Tests inject a stub; main wires the real one.
-type LLMClientFactory func(baseURL, apiKey string) LLM
+type LLMClientFactory func(baseURL, apiKey string, timeout time.Duration) LLM
 
 type LLM interface {
 	Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error)
@@ -43,7 +43,7 @@ type activeRequest struct {
 
 func NewEngine(store *db.Store, llmURL string, factory LLMClientFactory) *Engine {
 	if factory == nil {
-		factory = func(baseURL, apiKey string) LLM { return llm.NewClient(baseURL, apiKey) }
+		factory = func(baseURL, apiKey string, timeout time.Duration) LLM { return llm.NewClient(baseURL, apiKey, timeout) }
 	}
 	return &Engine{
 		Store:  store,
@@ -243,7 +243,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	}
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
 	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
-	modelName, requestDelay, _, contextSize := ParseModelConfig(modelValue, DefaultModel)
+	modelName, requestDelay, _, contextSize, requestTimeout := ParseModelConfig(modelValue, DefaultModel)
 
 	if contextSize <= 0 {
 		contextSize = 30000
@@ -310,7 +310,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 
 	baseURL := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_url", e.LLMURL)
 	apiKey := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_key", "")
-	client := e.NewLLM(baseURL, apiKey)
+	client := e.NewLLM(baseURL, apiKey, time.Duration(requestTimeout)*time.Second)
 	if debugEnabled {
 		log.Printf("[DEBUG] ConversationId=%s, LLM Model: %s", req.ConversationID, modelName)
 		log.Printf("[DEBUG] ConversationId=%s, LLM Messages: %v", req.ConversationID, msgs)
@@ -349,21 +349,22 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	return resp, nil
 }
 
-func ParseModelConfig(value string, defaultModel string) (string, int, string, int) {
+func ParseModelConfig(value string, defaultModel string) (string, int, string, int, int) {
 	var mCfg struct {
-		Model        string `json:"model"`
-		RequestDelay int    `json:"request_delay"`
-		SummaryModel string `json:"summary_model"`
-		ContextSize  int    `json:"context_size"`
+		Model          string `json:"model"`
+		RequestDelay   int    `json:"request_delay"`
+		RequestTimeout int    `json:"request_timeout"`
+		SummaryModel   string `json:"summary_model"`
+		ContextSize    int    `json:"context_size"`
 	}
 	if err := json.Unmarshal([]byte(value), &mCfg); err == nil && mCfg.Model != "" {
-		return mCfg.Model, mCfg.RequestDelay, mCfg.SummaryModel, mCfg.ContextSize
+		return mCfg.Model, mCfg.RequestDelay, mCfg.SummaryModel, mCfg.ContextSize, mCfg.RequestTimeout
 	}
 	// Fallback to legacy behavior if not JSON
 	if value == "" {
-		return defaultModel, 0, "", 0
+		return defaultModel, 0, "", 0, 0
 	}
-	return value, 0, "", 0
+	return value, 0, "", 0, 0
 }
 
 func atoiDefault(s string, def int) int {

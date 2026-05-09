@@ -30,12 +30,13 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
         return {
           model: parsed.model,
           request_delay: parsed.request_delay || 0,
+          request_timeout: parsed.request_timeout || 0,
           summary_model: parsed.summary_model || "",
           context_size: parsed.context_size || 30000,
         };
       }
     } catch (e) {}
-    return { model: val || "", request_delay: 0, summary_model: "", context_size: 30000 };
+    return { model: val || "", request_delay: 0, request_timeout: 0, summary_model: "", context_size: 30000 };
   };
 
   const initialValues = parseValue(init?.value);
@@ -45,6 +46,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
     scope_id: "",
     model: initialValues.model,
     request_delay: initialValues.request_delay,
+    request_timeout: initialValues.request_timeout,
     summary_model: initialValues.summary_model,
     context_size: initialValues.context_size,
     ...init,
@@ -65,6 +67,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
         value: JSON.stringify({
           model: f.model,
           request_delay: parseInt(f.request_delay) || 0,
+          request_timeout: parseInt(f.request_timeout) || 0,
           summary_model: f.summary_model || "",
           context_size: parseInt(f.context_size) || 30000,
         }),
@@ -72,6 +75,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
       // Remove local UI fields from DB payload
       delete payload.model;
       delete payload.request_delay;
+      delete payload.request_timeout;
       delete payload.summary_model;
       delete payload.context_size;
 
@@ -171,6 +175,19 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
           it.
         </div>
       </Field>
+      <Field label="Request Timeout (seconds)">
+        <input
+          type="number"
+          min="0"
+          value={f.request_timeout}
+          onChange={(e) => setF({ ...f, request_timeout: e.target.value })}
+          placeholder="0 (defaults to 300s)"
+        />
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Maximum time to wait for the LLM response. Use a higher value for slow
+          models.
+        </div>
+      </Field>
       <Field label="Context Window (tokens)">
         <input
           type="number"
@@ -261,7 +278,7 @@ export default function ModelConfigs() {
                               marginTop: 2,
                             }}
                           >
-                            ⏱️ {p.request_delay}s delay
+                            ⏱️ {p.request_delay}s delay / {p.request_timeout || 300}s timeout
                           </div>
                         )}
                         {p.summary_model && (

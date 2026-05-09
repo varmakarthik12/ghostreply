@@ -506,7 +506,7 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request) {
 func (a *API) listOllamaModels(w http.ResponseWriter, r *http.Request) {
 	baseURL := a.Store.GetConfigValue("llm_url", a.LLMURL)
 	apiKey := a.Store.GetConfigValue("llm_key", "")
-	client := a.Engine.NewLLM(baseURL, apiKey)
+	client := a.Engine.NewLLM(baseURL, apiKey, 0)
 
 	models, err := client.ListModels(r.Context())
 	if err != nil {

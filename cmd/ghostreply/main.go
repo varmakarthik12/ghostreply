@@ -112,7 +112,7 @@ func main() {
 		log.Printf("[DB] Warning: failed to create server session: %v", err)
 	}
 
-	apiHandler := api.NewAPI(store, token, store.GetConfigValue("llm_url", "http://localhost:11434"), func(baseURL, apiKey string) chat.LLM {
+	apiHandler := api.NewAPI(store, token, store.GetConfigValue("llm_url", "http://localhost:11434"), func(baseURL, apiKey string, timeout time.Duration) chat.LLM {
 		// LLM_KEY env is the generic name; fall back to OPENAI_API_KEY for backward compat.
 		key := apiKey
 		if key == "" {
@@ -121,7 +121,7 @@ func main() {
 		if key == "" {
 			key = os.Getenv("OPENAI_API_KEY")
 		}
-		return llm.NewClient(baseURL, key)
+		return llm.NewClient(baseURL, key, timeout)
 	})
 	apiHandler.Worker.Start()
 

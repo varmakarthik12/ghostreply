@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/llm"
@@ -30,7 +31,7 @@ func TestDeduplication(t *testing.T) {
 	}
 	defer store.Close()
 
-	factory := func(baseURL, apiKey string) LLM { return &mockLLM{} }
+	factory := func(baseURL, apiKey string, timeout time.Duration) LLM { return &mockLLM{} }
 	engine := NewEngine(store, "http://localhost:11434", factory)
 
 	ctx := context.Background()

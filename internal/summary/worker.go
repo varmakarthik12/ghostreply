@@ -169,7 +169,7 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 	prompt += "\n" + "## Conversation to Summarize" + "\n" + body
 
 	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
-	modelName, _, summaryModel, contextSize := chat.ParseModelConfig(modelValue, chat.DefaultModel)
+	modelName, _, summaryModel, contextSize, requestTimeout := chat.ParseModelConfig(modelValue, chat.DefaultModel)
 
 	if contextSize <= 0 {
 		contextSize = 30000
@@ -188,7 +188,7 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 
 	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
 	apiKey := w.Store.GetConfigValue("llm_key", "")
-	client := w.Engine.NewLLM(baseURL, apiKey)
+	client := w.Engine.NewLLM(baseURL, apiKey, time.Duration(requestTimeout)*time.Second)
 	reply, stats, err := client.Chat(ctx, finalModel, []llm.Message{
 		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific and structured. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
