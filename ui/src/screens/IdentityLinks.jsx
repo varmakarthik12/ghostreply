@@ -10,9 +10,9 @@ import { useResource } from "../lib/hooks";
 import { toast } from "../lib/toast";
 import { platformColor, shortId } from "../lib/utils";
 
-function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations }) {
+function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations, initialIdentity = "" }) {
   const [f, setF] = useState({
-    identity_id: "",
+    identity_id: initialIdentity,
     integration_id: "",
     conversation_ids: [],
   });
@@ -26,6 +26,7 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
 
   const filteredConvs = useMemo(() => {
     const s = search.toLowerCase();
+    // Filter out conversations already linked to ANY identity
     const linkedIds = existingLinks.map((l) => l.conversation_id);
     return conversations.filter((c) => {
       if (f.integration_id && c.integration_id !== f.integration_id)
@@ -91,6 +92,7 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
           value={f.identity_id}
           onChange={(e) => setF({ ...f, identity_id: e.target.value })}
           placeholder="Type to create or select…"
+          disabled={!!initialIdentity}
         />
         <datalist id="identity-suggestions">
           {identities.map((id) => (
@@ -215,7 +217,7 @@ function LinkForm({ onSave, onCancel, existingLinks, conversations, integrations
           Cancel
         </button>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? <Spinner /> : null} Create {f.conversation_ids.length > 1 ? `${f.conversation_ids.length} Mappings` : 'Mapping'}
+          {saving ? <Spinner /> : null} {initialIdentity ? 'Add to Identity' : 'Create Identity'}
         </button>
       </div>
     </>
@@ -227,12 +229,39 @@ export default function IdentityLinks() {
   const [convS] = useResource(() => apiGet("/conversations"), []);
   const [intS] = useResource(() => apiGet("/integrations"), []);
   const [modal, setModal] = useState(false);
+  const [editIdentity, setEditIdentity] = useState(null);
 
-  async function del(id) {
-    if (!window.confirm("Remove this mapping?")) return;
+  const grouped = useMemo(() => {
+    const data = s.data || [];
+    const groups = {};
+    data.forEach((l) => {
+      if (!groups[l.identity_id]) groups[l.identity_id] = [];
+      groups[l.identity_id].push(l);
+    });
+    return Object.keys(groups).map((id) => ({
+      identity_id: id,
+      links: groups[id],
+    }));
+  }, [s.data]);
+
+  async function unlink(linkId) {
+    if (!window.confirm("Unlink this conversation?")) return;
     try {
-      await apiDel("/identity-links/" + id);
-      toast("Removed Mapping");
+      await apiDel("/identity-links/" + linkId);
+      toast("Unlinked");
+      reload();
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
+
+  async function deleteIdentity(identityId, links) {
+    if (!window.confirm(`Delete entire identity "${identityId}" and all its ${links.length} links?`)) return;
+    try {
+      for (const l of links) {
+        await apiDel("/identity-links/" + l.id);
+      }
+      toast("Identity Deleted");
       reload();
     } catch (e) {
       toast(e.message, "error");
@@ -245,66 +274,85 @@ export default function IdentityLinks() {
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0 }}>🔗 Unified Identities</h2>
           <p style={{ margin: "4px 0 0 0", color: "var(--muted)", fontSize: 14 }}>
-            Map multiple conversations to a single identity for shared cross-platform memory.
+            Manage shared memory across different platforms for your contacts.
           </p>
         </div>
         <button
           className="btn btn-primary"
-          onClick={() => setModal(true)}
+          onClick={() => {
+            setEditIdentity(null);
+            setModal(true);
+          }}
           disabled={convS.loading || intS.loading}
         >
-          + Link Conversation
+          + New Identity
         </button>
       </div>
 
       <LoadTable
-        state={s}
-        cols={["Identity ID", "Conversation", "Platform", "ID", "Action"]}
+        state={{ ...s, data: grouped }}
+        cols={["Identity Name", "Linked Conversations", "Actions"]}
         emptyText="No linked identities yet"
-        renderRow={(r) => (
-          <tr key={r.id}>
-            <td>
-              <Badge color="accent">{r.identity_id}</Badge>
+        renderRow={(g) => (
+          <tr key={g.identity_id}>
+            <td style={{ verticalAlign: 'top', paddingTop: 16 }}>
+              <Badge color="accent" lg>{g.identity_id}</Badge>
             </td>
             <td>
-              <div style={{ fontWeight: 600 }}>{r.title || "Untitled"}</div>
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                {r.external_id}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+                {g.links.map(l => (
+                  <div key={l.id} style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 12, 
+                    padding: '8px 12px',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8
+                  }}>
+                    <Badge color={platformColor(l.platform)}>{l.platform}</Badge>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{l.title || "Untitled"}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{l.account} · {l.external_id}</div>
+                    </div>
+                    <button className="btn btn-sm" onClick={() => unlink(l.id)} title="Unlink">✕</button>
+                  </div>
+                ))}
               </div>
             </td>
-            <td>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Badge color={platformColor(r.platform)}>{r.platform}</Badge>
-                <span style={{ fontSize: 12 }}>{r.account}</span>
+            <td style={{ verticalAlign: 'top', paddingTop: 16 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setEditIdentity(g.identity_id);
+                    setModal(true);
+                  }}
+                >
+                  Add More
+                </button>
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={() => deleteIdentity(g.identity_id, g.links)}
+                >
+                  Delete Identity
+                </button>
               </div>
-            </td>
-            <td
-              className="mono"
-              style={{ fontSize: 11, color: "var(--muted)" }}
-            >
-              {shortId(r.id)}
-            </td>
-            <td>
-              <button
-                className="btn btn-danger btn-sm"
-                onClick={() => del(r.id)}
-              >
-                Unlink
-              </button>
             </td>
           </tr>
         )}
       />
 
       {modal && (
-        <Modal title="Link a Conversation" onClose={() => setModal(false)}>
+        <Modal title={editIdentity ? `Manage "${editIdentity}"` : "Create New Identity"} onClose={() => setModal(false)}>
           <LinkForm
+            initialIdentity={editIdentity || ""}
             conversations={convS.data || []}
             integrations={intS.data || []}
             existingLinks={s.data || []}
             onSave={() => {
               setModal(false);
-              toast("Linked");
+              toast("Saved");
               reload();
             }}
             onCancel={() => setModal(false)}
