@@ -70,6 +70,18 @@ export default function ActivityLogs() {
     if (ms < 0) return "0s";
     return (ms / 1000).toFixed(1) + "s";
   }
+  function formatLLMDuration(log) {
+    if (!log.metadata) return "-";
+    try {
+      const meta = JSON.parse(log.metadata);
+      if (meta.duration_ms !== undefined) {
+        return (meta.duration_ms / 1000).toFixed(1) + "s";
+      }
+    } catch (e) {
+      // ignore
+    }
+    return "-";
+  }
 
   return (
     <div>
@@ -121,7 +133,8 @@ export default function ActivityLogs() {
               <th>Type</th>
               <th>Operation</th>
               <th>Status</th>
-              <th>Duration</th>
+              <th>Total Duration</th>
+              <th>LLM Duration</th>
               <th>Details</th>
               <th>Actions</th>
             </tr>
@@ -129,7 +142,7 @@ export default function ActivityLogs() {
           <tbody>
             {logs.length === 0 && !loading ? (
               <tr className="empty-row">
-                <td colSpan="8">No activity logs found</td>
+                <td colSpan="9">No activity logs found</td>
               </tr>
             ) : (
               logs.map((log) => (
@@ -148,6 +161,7 @@ export default function ActivityLogs() {
                   </td>
                   <td>{getStatusBadge(log.status)}</td>
                   <td>{formatDuration(log)}</td>
+                  <td>{formatLLMDuration(log)}</td>
                   <td style={{ maxWidth: 300 }}>
                     {log.error_msg && (
                       <div className="alert alert-error" style={{ fontSize: 11, padding: "4px 8px", margin: 0 }}>

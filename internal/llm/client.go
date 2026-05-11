@@ -17,9 +17,10 @@ type Message struct {
 }
 
 type Stats struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens     int   `json:"prompt_tokens"`
+	CompletionTokens int   `json:"completion_tokens"`
+	TotalTokens      int   `json:"total_tokens"`
+	DurationMs       int64 `json:"duration_ms"`
 }
 
 // Client speaks to either an Ollama server (POST /api/chat) or any OpenAI-compatible
@@ -82,7 +83,10 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 	}
 	req.Header.Set("Content-Type", "application/json")
 	stats := Stats{PromptTokens: EstimateTokens(msgs)}
+	
+	start := time.Now()
 	resp, err := c.HTTP.Do(req)
+	duration := time.Since(start).Milliseconds()
 	if err != nil {
 		return "", stats, err
 	}
@@ -103,6 +107,7 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 		PromptTokens:     out.PromptEvalCount,
 		CompletionTokens: out.EvalCount,
 		TotalTokens:      out.PromptEvalCount + out.EvalCount,
+		DurationMs:       duration,
 	}
 	return strings.TrimSpace(out.Message.Content), stats, nil
 }
@@ -128,7 +133,10 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 	stats := Stats{PromptTokens: EstimateTokens(msgs)}
+	
+	start := time.Now()
 	resp, err := c.HTTP.Do(req)
+	duration := time.Since(start).Milliseconds()
 	if err != nil {
 		return "", stats, err
 	}
@@ -157,6 +165,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		PromptTokens:     out.Usage.PromptTokens,
 		CompletionTokens: out.Usage.CompletionTokens,
 		TotalTokens:      out.Usage.TotalTokens,
+		DurationMs:       duration,
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), stats, nil
 }

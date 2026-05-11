@@ -899,8 +899,11 @@ func (s *Store) CreateActivityLog(log *ActivityLog) error {
 	if log.SessionID == "" {
 		log.SessionID = CurrentSessionID
 	}
-	_, err := s.DB.Exec(`INSERT INTO activity_logs (id, session_id, type, conversation_id, conversation_title, request_type, status, error_msg, metadata) VALUES (?,?,?,?,?,?,?,?,?)`,
-		log.ID, log.SessionID, log.Type, log.ConversationID, log.ConversationTitle, log.RequestType, log.Status, nullable(log.ErrorMsg), nullable(log.Metadata))
+	if log.CreatedAt == "" {
+		log.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.DB.Exec(`INSERT INTO activity_logs (id, session_id, type, conversation_id, conversation_title, request_type, status, error_msg, metadata, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		log.ID, log.SessionID, log.Type, log.ConversationID, log.ConversationTitle, log.RequestType, log.Status, nullable(log.ErrorMsg), nullable(log.Metadata), log.CreatedAt)
 	if err == nil {
 		s.incrementStat(log.SessionID, log.Type, log.Status)
 	}
@@ -915,8 +918,9 @@ func (s *Store) UpdateActivityLog(id, status, errorMsg, metadata string) error {
 		return err
 	}
 
-	_, err = s.DB.Exec(`UPDATE activity_logs SET status=?, error_msg=?, metadata=?, completed_at=CURRENT_TIMESTAMP WHERE id=?`,
-		status, nullable(errorMsg), nullable(metadata), id)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = s.DB.Exec(`UPDATE activity_logs SET status=?, error_msg=?, metadata=?, completed_at=? WHERE id=?`,
+		status, nullable(errorMsg), nullable(metadata), now, id)
 	if err == nil && oldStatus != status {
 		s.decrementStat(sessionID, logType, oldStatus)
 		s.incrementStat(sessionID, logType, status)
