@@ -63,9 +63,8 @@ docker run -d \
   --name ghostreply \
   -p 8080:8080 \
   -v ghostreply-data:/data \
-  -e GHOSTREPLY_PORT=8080 \
   -e GHOSTREPLY_TOKEN="YOUR_SECRET_TOKEN" \
-  ghostreply
+  ghcr.io/varmakarthik12/ghostreply
 ```
 
 ---
