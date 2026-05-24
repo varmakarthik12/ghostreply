@@ -25,9 +25,9 @@ import (
 )
 
 var (
-	port      = flag.String("port", "8080", "Port to listen on")
-	tokenFlag = flag.String("token", "", "Bearer token (auto-generated if empty)")
-	dbPath    = flag.String("db-path", "", "SQLite database file path (default: ~/.ghostreply/ghostreply.db)")
+	portFlag   = flag.String("port", "", "Port to listen on (env: GHOSTREPLY_PORT) (default: 8080)")
+	tokenFlag  = flag.String("token", "", "Bearer token (env: GHOSTREPLY_TOKEN) (auto-generated if empty)")
+	dbPathFlag = flag.String("db-path", "", "SQLite database file path (env: GHOSTREPLY_DB_PATH) (default: ~/.ghostreply/ghostreply.db)")
 )
 
 // defaultDataDir returns ~/.ghostreply, creating the directory if needed.
@@ -76,6 +76,10 @@ func generateToken() string {
 }
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	dataDir, err := defaultDataDir()
@@ -87,7 +91,18 @@ func main() {
 		log.Fatalf("logging: %v", err)
 	}
 
-	resolvedDB := *dbPath
+	port := *portFlag
+	if port == "" {
+		port = os.Getenv("GHOSTREPLY_PORT")
+	}
+	if port == "" {
+		port = "8080"
+	}
+
+	resolvedDB := *dbPathFlag
+	if resolvedDB == "" {
+		resolvedDB = os.Getenv("GHOSTREPLY_DB_PATH")
+	}
 	usingDefault := false
 	if resolvedDB == "" {
 		resolvedDB = filepath.Join(dataDir, "ghostreply.db")
@@ -146,11 +161,11 @@ func main() {
 	}
 	log.Printf("=== GhostReply ===")
 	log.Printf("Token: %s", token)
-	log.Printf("Port:  %s", *port)
+	log.Printf("Port:  %s", port)
 	log.Printf("DB:    %s", dbLabel)
 	log.Printf("LLM:   %s", store.GetConfigValue("llm_url", "http://localhost:11434"))
-	log.Printf("Open   http://localhost:%s", *port)
-	log.Fatal(http.ListenAndServe(":"+*port, r))
+	log.Printf("Open   http://localhost:%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, r))
 }
 
 func spaHandler() http.HandlerFunc {

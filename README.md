@@ -42,6 +42,32 @@ cd ui && npm install && npm run build && cd ..
 go build -o ghostreply ./cmd/ghostreply
 ```
 
+### 3. Using Docker
+You can also run GhostReply in an isolated container.
+
+#### Build the Docker Image
+```bash
+docker build -t ghostreply .
+```
+
+#### Manually Create a Volume
+Create a persistent Docker volume to store the SQLite database so that your configurations, active sessions, and conversation memory are persisted:
+```bash
+docker volume create ghostreply-data
+```
+
+#### Run the Container
+Run the container, mounting the volume (the SQLite database file `ghostreply.db` is created in `/data` by default) and configuring the required ports/environment variables:
+```bash
+docker run -d \
+  --name ghostreply \
+  -p 8080:8080 \
+  -v ghostreply-data:/data \
+  -e GHOSTREPLY_PORT=8080 \
+  -e GHOSTREPLY_TOKEN="YOUR_SECRET_TOKEN" \
+  ghostreply
+```
+
 ---
 
 ## 🛠️ Getting Started
@@ -53,6 +79,27 @@ go build -o ghostreply ./cmd/ghostreply
    - **Integrations**: Define where the messages are coming from.
    - **Personas**: Write a detailed "System Prompt" describing who you are.
    - **Models**: Connect to Ollama (default) or OpenAI-compatible APIs.
+
+---
+
+## ⚙️ Configuration
+
+GhostReply can be configured using command-line flags or equivalent environment variables. If both are provided, command-line flags take precedence.
+
+### Options
+
+| Command-line Flag | Environment Variable | Default Value | Description |
+|---|---|---|---|
+| `-port` | `GHOSTREPLY_PORT` | `8080` | The port the Go server will listen on. |
+| `-token` | `GHOSTREPLY_TOKEN` | *Auto-generated* | The Bearer token used to authenticate requests to the dashboard and API. |
+| `-db-path` | `GHOSTREPLY_DB_PATH` | `~/.ghostreply/ghostreply.db` | SQLite database file path. |
+| (N/A) | `LLM_KEY` | (None) | API key for your LLM provider (Ollama / OpenAI compatible). |
+| (N/A) | `OPENAI_API_KEY` | (None) | Fallback / legacy API key for OpenAI compatible APIs. |
+
+To see the flags in your terminal, run:
+```bash
+./ghostreply --help
+```
 
 ---
 

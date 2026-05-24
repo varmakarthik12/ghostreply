@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/varmakarthik12/ghostreply/internal/chat"
@@ -35,7 +36,7 @@ func newTestServer(t *testing.T) (*API, http.Handler) {
 	t.Cleanup(func() { store.Close() })
 
 	stub := &stubLLM{Reply: "hi from stub"}
-	api := NewAPI(store, testToken, "http://localhost:11434", func(string, string) chat.LLM { return stub })
+	api := NewAPI(store, testToken, "http://localhost:11434", func(string, string, time.Duration) chat.LLM { return stub })
 	r := chi.NewRouter()
 	r.Route("/api", func(r chi.Router) { api.Mount(r) })
 	storeRegistry[r] = store
