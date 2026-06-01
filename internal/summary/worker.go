@@ -48,6 +48,18 @@ func (w *Worker) loop() {
 }
 
 func (w *Worker) RunOnce(ctx context.Context) {
+	// Auto-purge old activity logs
+	keepDaysStr := w.Store.GetConfigValue("activity_log_keep_days", "7")
+	if keepDays, err := strconv.Atoi(keepDaysStr); err == nil && keepDays > 0 {
+		if rows, err := w.Store.PurgeActivityLogs(keepDays); err == nil {
+			if rows > 0 {
+				log.Printf("summary worker: purged %d old activity log entries", rows)
+			}
+		} else {
+			log.Printf("summary worker: failed to purge activity logs: %v", err)
+		}
+	}
+
 	convs, err := w.Store.ListConversations("")
 	if err != nil {
 		return

@@ -71,6 +71,12 @@ const CONFIG_KEYS = [
     group: "other",
     desc: "Target timezone (e.g. America/New_York, Asia/Kolkata)",
   },
+  {
+    key: "activity_log_keep_days",
+    default: "7",
+    group: "other",
+    desc: "Days of activity logs to keep (0 to disable auto-purge)",
+  },
 ];
 
 function ConfigForm({ init, onSave, onCancel }) {

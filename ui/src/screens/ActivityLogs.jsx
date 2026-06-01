@@ -11,13 +11,25 @@ export default function ActivityLogs() {
     status: "",
     conversation_id: "",
   });
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(5);
 
   useEffect(() => {
     fetchLogs();
   }, [filters]);
 
-  async function fetchLogs() {
-    setLoading(true);
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const intervalId = setInterval(() => {
+      fetchLogs(true);
+    }, refreshInterval * 1000);
+    return () => clearInterval(intervalId);
+  }, [autoRefresh, refreshInterval, filters]);
+
+  async function fetchLogs(background = false) {
+    if (!background) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       if (filters.type) params.append("type", filters.type);
@@ -31,7 +43,9 @@ export default function ActivityLogs() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
     }
   }
 
@@ -117,6 +131,35 @@ export default function ActivityLogs() {
               <option value="pending">Pending</option>
               <option value="in_progress">In Progress</option>
               <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Auto Refresh</label>
+            <div style={{ display: "flex", alignItems: "center", height: "38px" }}>
+              <input
+                type="checkbox"
+                id="auto-refresh-toggle"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                style={{ marginRight: 8, cursor: "pointer", width: "16px", height: "16px" }}
+              />
+              <label htmlFor="auto-refresh-toggle" style={{ cursor: "pointer", margin: 0, userSelect: "none" }}>
+                Enabled
+              </label>
+            </div>
+          </div>
+          <div className="field">
+            <label>Refresh Interval</label>
+            <select
+              value={refreshInterval}
+              onChange={(e) => setRefreshInterval(Number(e.target.value))}
+              disabled={!autoRefresh}
+            >
+              <option value="2">2 Seconds</option>
+              <option value="5">5 Seconds</option>
+              <option value="10">10 Seconds</option>
+              <option value="30">30 Seconds</option>
+              <option value="60">60 Seconds</option>
             </select>
           </div>
         </div>

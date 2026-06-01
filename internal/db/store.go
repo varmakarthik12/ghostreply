@@ -989,6 +989,18 @@ func (s *Store) GetActivityLogByID(id string) (*ActivityLog, error) {
 	return &l, nil
 }
 
+func (s *Store) PurgeActivityLogs(keepDays int) (int64, error) {
+	if keepDays <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -keepDays).Format(time.RFC3339Nano)
+	res, err := s.DB.Exec(`DELETE FROM activity_logs WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) GetSessionStats(allTime bool) ([]OperationStats, error) {
 	q := `SELECT type, status, SUM(count) FROM operation_stats`
 	args := []interface{}{}
