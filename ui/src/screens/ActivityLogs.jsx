@@ -11,8 +11,8 @@ export default function ActivityLogs() {
     status: "",
     conversation_id: "",
   });
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState(5);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState(2);
 
   useEffect(() => {
     fetchLogs();
