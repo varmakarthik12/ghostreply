@@ -17,6 +17,8 @@ Built for privacy-conscious users, GhostReply runs locally or on your own server
 - 📊 **Operations Dashboard**: A beautiful, real-time UI to monitor every interaction, view token usage, and manually cancel in-progress replies.
 - 🔗 **Unified Identity (Cross-Platform Memory)**: Link multiple accounts across different platforms (e.g., Telegram, Discord, WhatsApp) to a single person. GhostReply aggregates summaries from all linked conversations so the AI remembers your shared history regardless of the platform.
 - 🔌 **Agnostic Integration**: Simple HTTP API makes it easy to bridge with any messaging proxy.
+- 🖼️ **Multimodal Support**: Understands images (snaps, photos, GIFs) and voice notes. GhostReply analyses the media using a dedicated vision or audio model and incorporates the description into the reply context so the AI can respond naturally.
+- 🤖 **Per-Type Model Configuration**: Use completely different models, hosts, API keys, and context windows for Chat, Summarization, Image analysis, and Voice transcription — all independently configurable per scope (global, integration, or conversation).
 
 ---
 
@@ -77,7 +79,7 @@ docker run -d \
 4. **Configure**:
    - **Integrations**: Define where the messages are coming from.
    - **Personas**: Write a detailed "System Prompt" describing who you are.
-   - **Models**: Connect to Ollama (default) or OpenAI-compatible APIs.
+   - **Model Configs**: Connect to Ollama (default) or OpenAI-compatible APIs and configure per-type models.
 
 ---
 
@@ -92,8 +94,6 @@ GhostReply can be configured using command-line flags or equivalent environment 
 | `-port` | `GHOSTREPLY_PORT` | `8080` | The port the Go server will listen on. |
 | `-token` | `GHOSTREPLY_TOKEN` | *Auto-generated* | The Bearer token used to authenticate requests to the dashboard and API. |
 | `-db-path` | `GHOSTREPLY_DB_PATH` | `~/.ghostreply/ghostreply.db` | SQLite database file path. |
-| (N/A) | `LLM_KEY` | (None) | API key for your LLM provider (Ollama / OpenAI compatible). |
-| (N/A) | `OPENAI_API_KEY` | (None) | Fallback / legacy API key for OpenAI compatible APIs. |
 
 To see the flags in your terminal, run:
 ```bash
@@ -120,6 +120,8 @@ GhostReply is designed to sit behind a messaging proxy. To trigger an auto-reply
   "chat_type": "private",
   "timestamp": "2026-05-09T10:00:00Z",
   "message_id": "msg-999",
+  "media_data": "<base64-encoded image or audio bytes>",
+  "media_type": "image/jpeg",
   "history": [
     {
       "content": "Previous message",
@@ -130,6 +132,12 @@ GhostReply is designed to sit behind a messaging proxy. To trigger an auto-reply
   ]
 }
 ```
+
+> **Multimodal fields** — `media_data` and `media_type` are optional. When provided:
+> - `media_data`: Base64-encoded raw bytes of the image or audio file (no data-URI prefix).
+> - `media_type`: MIME type, e.g. `image/jpeg`, `image/gif`, `audio/mpeg`, `audio/ogg`.
+>
+> GhostReply routes the data to the appropriate model (Image or Voice) based on `media_type`, summarises the content, and injects the description into the chat context before generating a reply.
 
 ### Response
 ```json
@@ -148,6 +156,83 @@ GhostReply solves the "context window" problem by using a background worker that
 2. **Recursive Summarization**: It takes all previous summaries and the newest batch of messages to create a fresh, consolidated "Background Memory."
 3. **Pruning**: Once summarized, the old messages are deleted from the database, and old summaries are replaced.
 4. **Injection**: The next time you get a message, this "Background Memory" is injected into the LLM prompt, allowing the agent to remember things you said weeks ago without wasting tokens on every single previous text.
+
+---
+
+## 🤖 Model Configuration
+
+GhostReply uses a **per-type model configuration** system. Every task type has its own independent settings, all manageable from the **Model Configs** screen in the dashboard.
+
+### Configuration Types
+
+| Type | Purpose | Default fallback |
+|---|---|---|
+| **Chat** | Generates the actual reply | `llama3.2` |
+| **Summary** | Summarizes old messages into background memory | Falls back to Chat |
+| **Image** | Analyses incoming images/snaps/GIFs | Falls back to Chat |
+| **Voice** | Understands incoming voice notes / audio | `whisper-1` |
+
+### Per-Type Settings
+
+Each type independently supports:
+
+| Setting | Description |
+|---|---|
+| **Model Name** | e.g. `gpt-4o`, `llava`, `whisper-1`, `gemma3:4b` |
+| **LLM URL** | Host & port, e.g. `http://localhost:11434` (Ollama) |
+| **API Key** | Leave blank for local/Ollama |
+| **Context Window** | Token limit for this task type (0 = 30 000 default) |
+
+### Scope Inheritance
+
+Model configs can be scoped at three levels. The most specific scope wins:
+
+```
+conversation → integration → global → built-in default
+```
+
+### JSON Structure (stored in `model_configs` table)
+
+```json
+{
+  "chat":    { "model": "llama3.2",    "url": "",                      "api_key": "", "context_size": 30000 },
+  "summary": { "model": "mistral",     "url": "",                      "api_key": "", "context_size": 8000  },
+  "image":   { "model": "gpt-4o-mini", "url": "https://api.openai.com","api_key": "sk-...", "context_size": 4096  },
+  "voice":   { "model": "whisper-1",   "url": "https://api.openai.com","api_key": "sk-...", "context_size": 0     },
+  "request_delay":   5,
+  "request_timeout": 120
+}
+```
+
+### Additional Timing Settings
+
+| Setting | Description |
+|---|---|
+| **Request Delay** | Seconds to wait before calling the LLM (simulates human typing delay) |
+| **Request Timeout** | Maximum seconds to wait for an LLM response (default 300 s) |
+
+---
+
+## 🖼️ Multimodal Message Handling
+
+GhostReply can process images and voice notes sent by the other person before generating a reply.
+
+### Images & Snaps
+
+When an image is included in the request (`media_type` starts with `image/`):
+
+1. The **Image model** is called with a vision prompt.
+2. The model classifies the snap as a person (selfie, portrait, group photo) or a random snap (object, scenery, meme, screenshot).
+3. A concise 1–2 sentence description is generated.
+4. The description is stored alongside the message and injected into the chat context as `[Received Snap/Image: <description>]`.
+
+### Voice Notes
+
+When an audio file is included (`media_type` starts with `audio/`):
+
+1. The **Voice model** is called with the raw audio bytes.
+2. The model summarises what was spoken, including key message, details, and tone.
+3. The summary is stored and injected into the chat context as `[Voice Note: <summary>]`.
 
 ---
 
@@ -174,4 +259,3 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
-
