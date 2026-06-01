@@ -94,6 +94,7 @@ export default function Messages({ initialConv }) {
             />,
             "Dir",
             "Content",
+            "Media",
             "Timestamp",
             "Action",
           ]}
@@ -115,6 +116,33 @@ export default function Messages({ initialConv }) {
               </td>
               <td style={{ maxWidth: 400, wordBreak: "break-word" }}>
                 {r.content}
+              </td>
+              <td style={{ maxWidth: 280 }}>
+                {r.media_description ? (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text)",
+                      background: r.media_description.startsWith("Voice Note:")
+                        ? "#1a2a1a"
+                        : "#1a1e2e",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      padding: "4px 8px",
+                      wordBreak: "break-word",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    <span style={{ marginRight: 4 }}>
+                      {r.media_description.startsWith("Voice Note:") ? "🎙️" : "🖼️"}
+                    </span>
+                    {r.media_description.startsWith("Voice Note:")
+                      ? r.media_description.replace(/^Voice Note:\s*/, "")
+                      : r.media_description}
+                  </div>
+                ) : (
+                  <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
+                )}
               </td>
               <td
                 style={{
