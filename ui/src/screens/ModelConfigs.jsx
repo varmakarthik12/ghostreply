@@ -22,41 +22,72 @@ const MODEL_SUGGESTIONS = [
   "gemini-2.0-flash",
 ];
 
-function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
-  const parseValue = (val) => {
-    try {
-      const parsed = JSON.parse(val);
-      if (parsed && typeof parsed === "object" && parsed.model) {
+const parseValue = (val) => {
+  try {
+    const parsed = JSON.parse(val);
+    if (parsed && typeof parsed === "object") {
+      if (parsed.chat || parsed.summary || parsed.image || parsed.voice) {
         return {
-          model: parsed.model,
+          chat: parsed.chat || { model: "", url: "", api_key: "", context_size: 0 },
+          summary: parsed.summary || { model: "", url: "", api_key: "", context_size: 0 },
+          image: parsed.image || { model: "", url: "", api_key: "", context_size: 0 },
+          voice: parsed.voice || { model: "", url: "", api_key: "", context_size: 0 },
           request_delay: parsed.request_delay || 0,
           request_timeout: parsed.request_timeout || 0,
-          summary_model: parsed.summary_model || "",
-          context_size: parsed.context_size || 30000,
+        };
+      } else if (parsed.model) {
+        // Legacy model JSON format
+        return {
+          chat: { model: parsed.model || "", url: "", api_key: "", context_size: parsed.context_size || 0 },
+          summary: { model: parsed.summary_model || "", url: "", api_key: "", context_size: 0 },
+          image: { model: parsed.image_model || parsed.vision_model || "", url: "", api_key: "", context_size: 0 },
+          voice: { model: parsed.voice_model || "", url: "", api_key: "", context_size: 0 },
+          request_delay: parsed.request_delay || 0,
+          request_timeout: parsed.request_timeout || 0,
         };
       }
-    } catch (e) {}
-    return { model: val || "", request_delay: 0, request_timeout: 0, summary_model: "", context_size: 30000 };
+    }
+  } catch (e) {}
+  return {
+    chat: { model: val || "", url: "", api_key: "", context_size: 0 },
+    summary: { model: "", url: "", api_key: "", context_size: 0 },
+    image: { model: "", url: "", api_key: "", context_size: 0 },
+    voice: { model: "", url: "", api_key: "", context_size: 0 },
+    request_delay: 0,
+    request_timeout: 0,
   };
+};
 
+function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
   const initialValues = parseValue(init?.value);
 
   const [f, setF] = useState({
     scope: "global",
     scope_id: "",
-    model: initialValues.model,
+    chat: initialValues.chat,
+    summary: initialValues.summary,
+    image: initialValues.image,
+    voice: initialValues.voice,
     request_delay: initialValues.request_delay,
     request_timeout: initialValues.request_timeout,
-    summary_model: initialValues.summary_model,
-    context_size: initialValues.context_size,
     ...init,
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
+  const updateSetting = (type, field, val) => {
+    setF((prev) => ({
+      ...prev,
+      [type]: {
+        ...(prev[type] || { model: "", url: "", api_key: "", context_size: 0 }),
+        [field]: val,
+      },
+    }));
+  };
+
   async function save() {
-    if (!f.model.trim()) {
-      setErr("Model name is required.");
+    if (!f.chat || !f.chat.model.trim()) {
+      setErr("Chat model name is required.");
       return;
     }
     setSaving(true);
@@ -65,19 +96,41 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
       const payload = {
         ...f,
         value: JSON.stringify({
-          model: f.model,
+          chat: {
+            model: f.chat.model,
+            url: f.chat.url || "",
+            api_key: f.chat.api_key || "",
+            context_size: parseInt(f.chat.context_size) || 0,
+          },
+          summary: {
+            model: f.summary.model || "",
+            url: f.summary.url || "",
+            api_key: f.summary.api_key || "",
+            context_size: parseInt(f.summary.context_size) || 0,
+          },
+          image: {
+            model: f.image.model || "",
+            url: f.image.url || "",
+            api_key: f.image.api_key || "",
+            context_size: parseInt(f.image.context_size) || 0,
+          },
+          voice: {
+            model: f.voice.model || "",
+            url: f.voice.url || "",
+            api_key: f.voice.api_key || "",
+            context_size: parseInt(f.voice.context_size) || 0,
+          },
           request_delay: parseInt(f.request_delay) || 0,
           request_timeout: parseInt(f.request_timeout) || 0,
-          summary_model: f.summary_model || "",
-          context_size: parseInt(f.context_size) || 30000,
         }),
       };
       // Remove local UI fields from DB payload
-      delete payload.model;
+      delete payload.chat;
+      delete payload.summary;
+      delete payload.image;
+      delete payload.voice;
       delete payload.request_delay;
       delete payload.request_timeout;
-      delete payload.summary_model;
-      delete payload.context_size;
 
       if (init?.id) await apiPut("/model-configs/" + init.id, payload);
       else await apiPost("/model-configs", payload);
@@ -88,15 +141,60 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
     setSaving(false);
   }
 
+  const renderModelSection = (type, title, isRequired = false, placeholderModel = "") => {
+    const setting = f[type] || { model: "", url: "", api_key: "", context_size: 0 };
+    return (
+      <div className="card" style={{ marginBottom: 16, padding: "16px 20px", borderLeft: "4px solid var(--accent)" }} key={type}>
+        <h4 style={{ margin: "0 0 12px 0", color: "var(--accent)" }}>
+          {title} {isRequired && <span style={{ color: "var(--red)" }}>*</span>}
+        </h4>
+        <div className="responsive-grid" style={{ gap: 12 }}>
+          <Field label="Model Name">
+            <input
+              list="model-list"
+              value={setting.model}
+              onChange={(e) => updateSetting(type, "model", e.target.value)}
+              placeholder={placeholderModel}
+            />
+          </Field>
+          <Field label="LLM URL (Host & Port)">
+            <input
+              value={setting.url}
+              onChange={(e) => updateSetting(type, "url", e.target.value)}
+              placeholder="e.g. http://localhost:11434"
+            />
+          </Field>
+          <Field label="API Key">
+            <input
+              type="password"
+              value={setting.api_key}
+              onChange={(e) => updateSetting(type, "api_key", e.target.value)}
+              placeholder="Leave blank for local/Ollama"
+            />
+          </Field>
+          <Field label="Context Window (tokens)">
+            <input
+              type="number"
+              min="0"
+              value={setting.context_size || ""}
+              onChange={(e) => updateSetting(type, "context_size", e.target.value)}
+              placeholder="e.g. 30000 (0 for default)"
+            />
+          </Field>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <>
+    <div style={{ maxHeight: "calc(90vh - 120px)", overflowY: "auto", paddingRight: 8 }}>
       {err && (
         <Alert type="error" onClose={() => setErr("")}>
           {err}
         </Alert>
       )}
       {!init?.id && (
-        <>
+        <div className="responsive-grid" style={{ gap: 16, marginBottom: 16 }}>
           <Field label="Scope">
             <select
               value={f.scope}
@@ -133,75 +231,51 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
               />
             </Field>
           )}
-        </>
+        </div>
       )}
-      <Field label="Model Name *">
-        <input
-          list="model-list"
-          value={f.model}
-          onChange={(e) => setF({ ...f, model: e.target.value })}
-          placeholder="llama3.2"
-        />
-        <datalist id="model-list">
-          {[...new Set([...(ollamaModels || []), ...MODEL_SUGGESTIONS])].map(
-            (m) => (
-              <option key={m} value={m} />
-            ),
-          )}
-        </datalist>
-      </Field>
-      <Field label="Summary Model">
-        <input
-          list="model-list"
-          value={f.summary_model}
-          onChange={(e) => setF({ ...f, summary_model: e.target.value })}
-          placeholder="Mistral (fallback to main model if empty)"
-        />
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-          Optional: Use a different model for background summarization to save
-          costs or time.
-        </div>
-      </Field>
-      <Field label="Request Delay (seconds)">
-        <input
-          type="number"
-          min="0"
-          value={f.request_delay}
-          onChange={(e) => setF({ ...f, request_delay: e.target.value })}
-          placeholder="0"
-        />
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-          Wait this many seconds before triggering the LLM to avoid overwhelming
-          it.
-        </div>
-      </Field>
-      <Field label="Request Timeout (seconds)">
-        <input
-          type="number"
-          min="0"
-          value={f.request_timeout}
-          onChange={(e) => setF({ ...f, request_timeout: e.target.value })}
-          placeholder="0 (defaults to 300s)"
-        />
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-          Maximum time to wait for the LLM response. Use a higher value for slow
-          models.
-        </div>
-      </Field>
-      <Field label="Context Window (tokens)">
-        <input
-          type="number"
-          min="0"
-          value={f.context_size}
-          onChange={(e) => setF({ ...f, context_size: e.target.value })}
-          placeholder="30000"
-        />
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-          Maximum context window size (Ollama: <code>num_ctx</code>). Default: 30,000.
-        </div>
-      </Field>
-      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
-        Inheritance: conversation → integration → global → default (llama3.2)
+
+      <datalist id="model-list">
+        {[...new Set([...(ollamaModels || []), ...MODEL_SUGGESTIONS])].map(
+          (m) => (
+            <option key={m} value={m} />
+          ),
+        )}
+      </datalist>
+
+      {renderModelSection("chat", "💬 Chat (Conversation Model)", true, "llama3.2")}
+      {renderModelSection("summary", "📝 Summary Model", false, "Mistral (falls back to Chat if empty)")}
+      {renderModelSection("image", "🖼️ Image Model (Vision capabilities)", false, "gpt-4o-mini (falls back to Chat if empty)")}
+      {renderModelSection("voice", "🎙️ Voice Model (Audio / Speech capabilities)", false, "whisper-1")}
+
+      <div className="responsive-grid" style={{ gap: 16, marginTop: 16 }}>
+        <Field label="Request Delay (seconds)">
+          <input
+            type="number"
+            min="0"
+            value={f.request_delay}
+            onChange={(e) => setF({ ...f, request_delay: e.target.value })}
+            placeholder="0"
+          />
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+            Wait this many seconds before triggering the LLM.
+          </div>
+        </Field>
+        <Field label="Request Timeout (seconds)">
+          <input
+            type="number"
+            min="0"
+            value={f.request_timeout}
+            onChange={(e) => setF({ ...f, request_timeout: e.target.value })}
+            placeholder="0 (defaults to 300s)"
+          />
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+            Maximum time to wait for the LLM response.
+          </div>
+        </Field>
+      </div>
+
+      <div style={{ fontSize: 12, color: "var(--muted)", margin: "16px 0" }}>
+        💡 <strong>Inheritance:</strong> conversation → integration → global → default. Fallback models default to Chat settings.
       </div>
       <div className="modal-footer">
         <button className="btn btn-secondary" onClick={onCancel}>
@@ -212,7 +286,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
           {init?.id ? "Save" : "Add"}
         </button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -249,7 +323,7 @@ export default function ModelConfigs() {
       </div>
       <LoadTable
         state={s}
-        cols={["Scope", "Scope ID", "Model", "Actions"]}
+        cols={["Scope", "Scope ID", "Model Settings", "Actions"]}
         emptyText="No model configs — default: llama3.2"
         renderRow={(r) => (
           <tr key={r.id}>
@@ -264,48 +338,32 @@ export default function ModelConfigs() {
             </td>
             <td>
               {(() => {
-                try {
-                  const p = JSON.parse(r.value);
-                  if (p && p.model) {
-                    return (
-                      <div>
-                        <code>{p.model}</code>
-                        {p.request_delay > 0 && (
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: "var(--primary)",
-                              marginTop: 2,
-                            }}
-                          >
-                            ⏱️ {p.request_delay}s delay / {p.request_timeout || 300}s timeout
-                          </div>
-                        )}
-                        {p.summary_model && (
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: "var(--muted)",
-                              marginTop: 2,
-                            }}
-                          >
-                            📝 Summary: <code>{p.summary_model}</code>
-                          </div>
-                        )}
-                        <div
-                          style={{
-                            fontSize: 10,
-                            color: "var(--muted)",
-                            marginTop: 2,
-                          }}
-                        >
-                          🧠 Context: {p.context_size || 30000} tokens
-                        </div>
+                const cfg = parseValue(r.value);
+                const renderSetting = (label, s) => {
+                  if (!s || !s.model) return null;
+                  return (
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }} key={label}>
+                      {label}: <code>{s.model}</code>
+                      {s.url && ` (${s.url})`}
+                      {s.context_size > 0 && ` [${s.context_size} ctx]`}
+                    </div>
+                  );
+                };
+                return (
+                  <div>
+                    <code>{cfg.chat.model}</code>
+                    {cfg.chat.url && <span style={{ fontSize: 10, color: "var(--primary)" }}> ({cfg.chat.url})</span>}
+                    {cfg.chat.context_size > 0 && <span style={{ fontSize: 10, color: "var(--muted)" }}> [{cfg.chat.context_size} ctx]</span>}
+                    {(cfg.request_delay > 0 || cfg.request_timeout > 0) && (
+                      <div style={{ fontSize: 10, color: "var(--primary)", marginTop: 2 }}>
+                        ⏱️ {cfg.request_delay}s delay / {cfg.request_timeout || 300}s timeout
                       </div>
-                    );
-                  }
-                } catch (e) {}
-                return <code>{r.value}</code>;
+                    )}
+                    {renderSetting("📝 Summary", cfg.summary)}
+                    {renderSetting("🖼️ Image", cfg.image)}
+                    {renderSetting("🎙️ Voice", cfg.voice)}
+                  </div>
+                );
               })()}
             </td>
             <td>
@@ -327,6 +385,7 @@ export default function ModelConfigs() {
       />
       {modal && (
         <Modal
+          wide
           title={modal.id ? "Edit Model Config" : "Add Model Config"}
           onClose={() => setModal(null)}
         >

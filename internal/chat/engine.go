@@ -27,6 +27,22 @@ type LLM interface {
 	ListModels(ctx context.Context) ([]string, error)
 }
 
+type ModelSetting struct {
+	Model       string `json:"model"`
+	URL         string `json:"url,omitempty"`
+	APIKey      string `json:"api_key,omitempty"`
+	ContextSize int    `json:"context_size,omitempty"`
+}
+
+type ModelConfig struct {
+	Chat           ModelSetting `json:"chat"`
+	Summary        ModelSetting `json:"summary"`
+	Image          ModelSetting `json:"image"`
+	Voice          ModelSetting `json:"voice"`
+	RequestDelay   int          `json:"request_delay"`
+	RequestTimeout int          `json:"request_timeout"`
+}
+
 type Engine struct {
 	Store  *db.Store
 	LLMURL string
@@ -62,6 +78,8 @@ type AutoReplyRequest struct {
 	Timestamp      string           `json:"timestamp"`
 	MessageID      string           `json:"message_id"`
 	History        []HistoryMessage `json:"history"`
+	MediaData      string           `json:"media_data"`
+	MediaType      string           `json:"media_type"`
 }
 
 type HistoryMessage struct {
@@ -135,6 +153,12 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		log.Printf("[DEBUG] AutoReply Request (Integration: %s, Conv: %s):\n%s", req.IntegrationID, req.ConversationID, string(reqJSON))
 	}
 
+	// Early initialization of model settings and LLM client to support media analysis
+	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
+	cfg := ParseModelConfig(modelValue, DefaultModel)
+
+	chatClient, chatModel, chatContextSize := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Chat, DefaultModel, cfg.RequestTimeout)
+
 	// 4. Sync message history
 	for _, hm := range req.History {
 		isOutbound := 0
@@ -171,6 +195,83 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	}
 
 	// 5. Process current message
+	mediaDescription := ""
+	if req.MediaData != "" {
+		isAudio := strings.HasPrefix(req.MediaType, "audio/")
+
+		if isAudio {
+			// Resolve voice client, model, and context window
+			voiceClient, voiceModel, voiceCtxSize := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Voice, "whisper-1", cfg.RequestTimeout)
+
+			_ = e.Store.UpdateActivityLog(logID, "in_progress", "Transcribing received voice note...", "")
+
+			format := "mp3"
+			if strings.Contains(req.MediaType, "wav") {
+				format = "wav"
+			} else if strings.Contains(req.MediaType, "aac") {
+				format = "aac"
+			} else if strings.Contains(req.MediaType, "ogg") || strings.Contains(req.MediaType, "opus") {
+				format = "opus"
+			}
+
+			analysisPrompt := "Identify what is spoken in this audio/voice note. Summarize the key message, details, and tone in 1-2 brief, descriptive sentences. Respond ONLY with the final summary."
+
+			analysisMsgs := []llm.Message{
+				{
+					Role:    "user",
+					Content: analysisPrompt,
+					Audios: []llm.AudioContent{
+						{
+							Data:   req.MediaData,
+							Format: format,
+						},
+					},
+				},
+			}
+
+			reply, _, err := voiceClient.Chat(ctx, voiceModel, analysisMsgs, voiceCtxSize)
+			if err != nil {
+				log.Printf("[ERROR] Voice note analysis failed: %v", err)
+				mediaDescription = "Voice Note: (analysis failed)"
+			} else {
+				mediaDescription = "Voice Note: " + strings.TrimSpace(reply)
+				if debugEnabled {
+					log.Printf("[DEBUG] Generated voice transcription/summary: %s", mediaDescription)
+				}
+			}
+		} else {
+			// Resolve image client, model, and context window
+			imageClient, imageModel, imageCtxSize := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Image, chatModel, cfg.RequestTimeout)
+
+			_ = e.Store.UpdateActivityLog(logID, "in_progress", "Analyzing received image...", "")
+
+			analysisPrompt := "Identify if this image is a snap of a person (e.g. selfie, portrait, group photo, body picture) or a random snap (e.g. object, scenery, screenshot, meme, background, etc.). Summarize what the snap is, describing the content, mood, action, or expressions. Keep it to 1-2 brief, descriptive sentences. Respond ONLY with the final summary."
+
+			prefix := "data:image/jpeg;base64,"
+			if req.MediaType != "" {
+				prefix = "data:" + req.MediaType + ";base64,"
+			}
+
+			analysisMsgs := []llm.Message{
+				{
+					Role:    "user",
+					Content: analysisPrompt,
+					Images:  []string{prefix + req.MediaData},
+				},
+			}
+
+			reply, _, err := imageClient.Chat(ctx, imageModel, analysisMsgs, imageCtxSize)
+			if err != nil {
+				log.Printf("[ERROR] Media analysis failed: %v", err)
+			} else {
+				mediaDescription = strings.TrimSpace(reply)
+				if debugEnabled {
+					log.Printf("[DEBUG] Generated media summary (image): %s", mediaDescription)
+				}
+			}
+		}
+	}
+
 	hashKey := req.MessageID
 	if hashKey == "" {
 		hashKey = req.Timestamp
@@ -182,13 +283,14 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		}
 	} else {
 		if err := e.Store.InsertMessage(&db.Message{
-			ConversationID: conv.ID,
-			IsOutbound:     0,
-			Content:        req.Content,
-			SenderID:       req.SenderID,
-			SenderName:     req.SenderName,
-			DedupHash:      hash,
-			Timestamp:      req.Timestamp,
+			ConversationID:   conv.ID,
+			IsOutbound:       0,
+			Content:          req.Content,
+			SenderID:         req.SenderID,
+			SenderName:       req.SenderName,
+			DedupHash:        hash,
+			Timestamp:        req.Timestamp,
+			MediaDescription: mediaDescription,
 		}); err != nil {
 			return nil, fmt.Errorf("insert incoming: %w", err)
 		}
@@ -242,20 +344,14 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		summaryText += sm.Text
 	}
 	persona := e.Store.ResolvePersona(conv.ID, req.IntegrationID)
-	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
-	modelName, requestDelay, _, contextSize, requestTimeout := ParseModelConfig(modelValue, DefaultModel)
 
-	if contextSize <= 0 {
-		contextSize = 30000
-	}
-
-	if requestDelay > 0 {
+	if cfg.RequestDelay > 0 {
 		if debugEnabled {
-			log.Printf("[DEBUG] Delaying auto-reply by %d seconds as per model config", requestDelay)
+			log.Printf("[DEBUG] Delaying auto-reply by %d seconds as per model config", cfg.RequestDelay)
 		}
 		_ = e.Store.UpdateActivityLog(logID, "in_progress", "Waiting for request delay", "")
 		select {
-		case <-time.After(time.Duration(requestDelay) * time.Second):
+		case <-time.After(time.Duration(cfg.RequestDelay) * time.Second):
 		case <-ctx.Done():
 			_ = e.Store.UpdateActivityLog(logID, "cancelled", "Request canceled during delay", "")
 			return nil, ctx.Err()
@@ -302,21 +398,27 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		content := m.Content
 		if m.IsOutbound == 1 {
 			role = "assistant"
-		} else if m.SenderName != "" {
-			content = fmt.Sprintf("[%s]: %s", m.SenderName, m.Content)
+		} else {
+			if m.MediaDescription != "" {
+				if strings.HasPrefix(m.MediaDescription, "Voice Note: ") {
+					content = fmt.Sprintf("%s\n[%s]", content, m.MediaDescription)
+				} else {
+					content = fmt.Sprintf("%s\n[Received Snap/Image: %s]", content, m.MediaDescription)
+				}
+			}
+			if m.SenderName != "" {
+				content = fmt.Sprintf("[%s]: %s", m.SenderName, content)
+			}
 		}
 		msgs = append(msgs, llm.Message{Role: role, Content: content})
 	}
 
-	baseURL := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_url", e.LLMURL)
-	apiKey := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "llm_key", "")
-	client := e.NewLLM(baseURL, apiKey, time.Duration(requestTimeout)*time.Second)
 	if debugEnabled {
-		log.Printf("[DEBUG] ConversationId=%s, LLM Model: %s", req.ConversationID, modelName)
+		log.Printf("[DEBUG] ConversationId=%s, LLM Model: %s", req.ConversationID, chatModel)
 		log.Printf("[DEBUG] ConversationId=%s, LLM Messages: %v", req.ConversationID, msgs)
 	}
 
-	reply, stats, err := client.Chat(ctx, modelName, msgs, contextSize)
+	reply, stats, err := chatClient.Chat(ctx, chatModel, msgs, chatContextSize)
 	if err != nil {
 		status := "failure"
 		errMsg := err.Error()
@@ -349,22 +451,42 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	return resp, nil
 }
 
-func ParseModelConfig(value string, defaultModel string) (string, int, string, int, int) {
-	var mCfg struct {
-		Model          string `json:"model"`
-		RequestDelay   int    `json:"request_delay"`
-		RequestTimeout int    `json:"request_timeout"`
-		SummaryModel   string `json:"summary_model"`
-		ContextSize    int    `json:"context_size"`
+func (e *Engine) ResolveLLMClient(convID, integrationID string, setting ModelSetting, defaultModel string, globalTimeout int) (LLM, string, int) {
+	url := setting.URL
+	if url == "" {
+		url = e.LLMURL
 	}
-	if err := json.Unmarshal([]byte(value), &mCfg); err == nil && mCfg.Model != "" {
-		return mCfg.Model, mCfg.RequestDelay, mCfg.SummaryModel, mCfg.ContextSize, mCfg.RequestTimeout
+
+	key := setting.APIKey
+
+	model := setting.Model
+	if model == "" {
+		model = defaultModel
 	}
-	// Fallback to legacy behavior if not JSON
-	if value == "" {
-		return defaultModel, 0, "", 0, 0
+
+	ctxSize := setting.ContextSize
+	if ctxSize <= 0 {
+		ctxSize = 30000
 	}
-	return value, 0, "", 0, 0
+
+	timeout := 5 * time.Minute
+	if globalTimeout > 0 {
+		timeout = time.Duration(globalTimeout) * time.Second
+	}
+
+	client := e.NewLLM(url, key, timeout)
+	return client, model, ctxSize
+}
+
+func ParseModelConfig(value string, defaultModel string) ModelConfig {
+	var cfg ModelConfig
+	if err := json.Unmarshal([]byte(value), &cfg); err == nil && (cfg.Chat.Model != "" || cfg.Summary.Model != "" || cfg.Image.Model != "" || cfg.Voice.Model != "") {
+		return cfg
+	}
+
+	// Fallback to default model name if parsing failed or empty
+	cfg.Chat.Model = defaultModel
+	return cfg
 }
 
 func atoiDefault(s string, def int) int {

@@ -12,18 +12,6 @@ import { scopeColor, shortId } from "../lib/utils";
 
 const CONFIG_KEYS = [
   {
-    key: "llm_url",
-    default: "http://localhost:11434",
-    group: "llm",
-    desc: "LLM endpoint (Ollama or any OpenAI-compatible URL)",
-  },
-  {
-    key: "llm_key",
-    default: "(empty)",
-    group: "llm",
-    desc: "API key — leave blank for Ollama",
-  },
-  {
     key: "summary_threshold",
     default: "50",
     group: "summary",
@@ -177,44 +165,7 @@ export default function Settings() {
   const [s, reload] = useResource(() => apiGet("/configs"), []);
   const [modal, setModal] = useState(null);
 
-  // LLM quick-config state
-  const [llmUrl, setLlmUrl] = useState("");
-  const [llmKey, setLlmKey] = useState("");
-  const [savingLlm, setSavingLlm] = useState(false);
 
-  useEffect(() => {
-    if (!s.data) return;
-    const url = s.data.find((c) => c.scope === "global" && c.key === "llm_url");
-    const key = s.data.find((c) => c.scope === "global" && c.key === "llm_key");
-    if (url) setLlmUrl(url.value);
-    if (key) setLlmKey(key.value);
-  }, [s.data]);
-
-  async function saveLlmConfig() {
-    setSavingLlm(true);
-    try {
-      const upsert = async (key, value) => {
-        const existing = (s.data || []).find(
-          (c) => c.scope === "global" && c.key === key,
-        );
-        if (existing) await apiPut("/configs/" + existing.id, { key, value });
-        else
-          await apiPost("/configs", {
-            scope: "global",
-            scope_id: "",
-            key,
-            value,
-          });
-      };
-      await upsert("llm_url", llmUrl || "http://localhost:11434");
-      if (llmKey !== "") await upsert("llm_key", llmKey);
-      toast("LLM config saved");
-      reload();
-    } catch (e) {
-      toast(e.message, "error");
-    }
-    setSavingLlm(false);
-  }
 
   async function del(id) {
     if (!window.confirm("Delete config?")) return;
@@ -237,53 +188,6 @@ export default function Settings() {
           onClick={() => setModal({})}
         >
           + Add Config
-        </button>
-      </div>
-
-      {/* LLM provider quick-setup */}
-      <div
-        className="card"
-        style={{ marginBottom: 16, borderColor: "#1f6feb" }}
-      >
-        <h3>🤖 LLM Provider (Global)</h3>
-        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>
-          Default LLM endpoint and API key. Override per-integration or
-          per-conversation in the table below.
-        </p>
-        <div className="responsive-grid" style={{ gap: 12, marginBottom: 12 }}>
-          <Field label="LLM URL">
-            <input
-              list="llm-url-hints"
-              value={llmUrl}
-              onChange={(e) => setLlmUrl(e.target.value)}
-              placeholder="http://localhost:11434"
-            />
-            <datalist id="llm-url-hints">
-              <option value="http://localhost:11434" />
-              <option value="https://api.openai.com" />
-              <option value="https://api.groq.com/openai" />
-              <option value="https://openrouter.ai/api" />
-            </datalist>
-          </Field>
-          <Field label="API Key (leave blank for Ollama)">
-            <input
-              type="password"
-              value={llmKey}
-              onChange={(e) => setLlmKey(e.target.value)}
-              placeholder="sk-… or blank for Ollama"
-            />
-          </Field>
-        </div>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
-          💡 Ollama: leave API Key blank. OpenAI / Groq / OpenRouter: set the
-          URL and paste the key.
-        </div>
-        <button
-          className="btn btn-accent"
-          onClick={saveLlmConfig}
-          disabled={savingLlm}
-        >
-          {savingLlm ? <Spinner /> : null} Save LLM Config
         </button>
       </div>
 

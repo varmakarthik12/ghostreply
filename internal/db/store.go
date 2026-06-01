@@ -58,6 +58,7 @@ func (s *Store) Migrate() error {
 	addColumn("conversations", "chat_type", "TEXT")
 	addColumn("messages", "sender_id", "TEXT")
 	addColumn("messages", "sender_name", "TEXT")
+	addColumn("messages", "media_description", "TEXT")
 	addColumn("configs", "updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
 
 	// Rename webhook_url to endpoint_url in integrations
@@ -183,14 +184,15 @@ type Conversation struct {
 }
 
 type Message struct {
-	ID             string `json:"id"`
-	ConversationID string `json:"conversation_id"`
-	IsOutbound     int    `json:"is_outbound"`
-	Content        string `json:"content"`
-	SenderID       string `json:"sender_id"`
-	SenderName     string `json:"sender_name"`
-	DedupHash      string `json:"dedup_hash"`
-	Timestamp      string `json:"timestamp"`
+	ID               string `json:"id"`
+	ConversationID   string `json:"conversation_id"`
+	IsOutbound       int    `json:"is_outbound"`
+	Content          string `json:"content"`
+	SenderID         string `json:"sender_id"`
+	SenderName       string `json:"sender_name"`
+	DedupHash        string `json:"dedup_hash"`
+	Timestamp        string `json:"timestamp"`
+	MediaDescription string `json:"media_description,omitempty"`
 }
 
 type Summary struct {
@@ -387,13 +389,14 @@ func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error
 	// Use ROW_NUMBER() to deduplicate.
 	// This handles cases where duplicates might exist due to race conditions or sync issues.
 	q := `
-		SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp
+		SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp, COALESCE(media_description, '')
 		FROM (
 			SELECT id, conversation_id, is_outbound, content, 
 			       COALESCE(sender_id,'') as sender_id, 
 			       COALESCE(sender_name,'') as sender_name, 
 			       COALESCE(dedup_hash,'') as dedup_hash, 
 			       timestamp,
+			       media_description,
 			       ROW_NUMBER() OVER (
 			           PARTITION BY conversation_id, is_outbound, content, timestamp 
 			           ORDER BY id
@@ -412,7 +415,7 @@ func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp, &m.MediaDescription); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -452,8 +455,8 @@ func (s *Store) InsertMessage(m *Message) error {
 	if m.Timestamp == "" {
 		m.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.DB.Exec(`INSERT INTO messages (id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp) VALUES (?,?,?,?,?,?,?,?)`,
-		m.ID, m.ConversationID, m.IsOutbound, m.Content, m.SenderID, m.SenderName, nullable(m.DedupHash), m.Timestamp)
+	_, err := s.DB.Exec(`INSERT INTO messages (id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp, media_description) VALUES (?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.ConversationID, m.IsOutbound, m.Content, m.SenderID, m.SenderName, nullable(m.DedupHash), m.Timestamp, nullable(m.MediaDescription))
 	return err
 }
 
@@ -461,9 +464,9 @@ func (s *Store) FindMessageByDedup(hash string) (*Message, error) {
 	if hash == "" {
 		return nil, sql.ErrNoRows
 	}
-	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp FROM messages WHERE dedup_hash=?`, hash)
+	row := s.DB.QueryRow(`SELECT id, conversation_id, is_outbound, content, COALESCE(sender_id,''), COALESCE(sender_name,''), COALESCE(dedup_hash,''), timestamp, COALESCE(media_description,'') FROM messages WHERE dedup_hash=?`, hash)
 	var m Message
-	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp); err != nil {
+	if err := row.Scan(&m.ID, &m.ConversationID, &m.IsOutbound, &m.Content, &m.SenderID, &m.SenderName, &m.DedupHash, &m.Timestamp, &m.MediaDescription); err != nil {
 		return nil, err
 	}
 	return &m, nil

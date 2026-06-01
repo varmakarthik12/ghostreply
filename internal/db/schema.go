@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_id       TEXT,
     sender_name     TEXT,
     dedup_hash      TEXT UNIQUE,
-    timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP
+    timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    media_description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS summaries (

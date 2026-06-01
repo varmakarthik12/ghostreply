@@ -151,28 +151,30 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 	}
 
 	prompt := `
-	You are a memory compression assistant for a chat agent.
+	You are a conversation memory compression and profiling assistant. Your job is to read the previous summaries (if any) and the recent conversation history, then produce an updated, highly detailed, full-fledged summary profile. You MUST preserve ALL details, facts, names, events, and background info from the previous summaries. Do NOT drop anything unless it was explicitly contradicted in the new conversation.
 
-	## Your Job
-	Read the conversation history below and produce a compact summary that captures everything the agent needs to stay consistent and human in future replies.
-
-	## What to Capture (if present)
-	- The other person's name, age, location, language, and any personal details they shared
-	- Their current emotional state and how the conversation feels (cold, warm, flirty, trusting, etc.)
-	- Key stories, problems, or life events they mentioned
-	- How far the relationship has progressed (just met / building trust / emotionally close / flirting / intimate)
-	- Anything the agent ("HOST") revealed about himself — even vague things
-	- Any topics that were sensitive, avoided, or deflected
-	- The last message sent and the current mood/vibe of the conversation
+	## What You MUST Capture & Preserve (Do not miss any details):
+	1. Complete User Profile & Facts:
+	   - Full name, nickname, age, date of birth, location, home town, nationality, language(s).
+	   - Job/school details, career goals, daily routine, hobbies, music/media/food preferences.
+	   - Details of friends, family members, pets (names, stories, dynamics).
+	   - Explicit preferences, likes, dislikes, habits, unique quirks.
+	2. Relationship Progress & Vibe:
+	   - Exact relationship stage (strangers, acquaintances, friends, close friends, flirting, intimate).
+	   - Emotional tone (warm, cold, sarcastic, playful, cautious, flirty, deep).
+	   - Inside jokes, shared memories, recurring topics.
+	3. Host (Agent / "HOST") Profile Consistency:
+	   - Every single fact or story the HOST has told the user about themselves (hobbies, job, location, family, thoughts). Never contradict these in future replies.
+	4. Recent Thread & Pending Context:
+	   - What was discussed in the last few messages, unanswered questions, active plans, immediate mood, and how the conversation left off.
 
 	## Output Format
-	Write in plain paragraphs. No bullet points, no headers. Write it like briefing notes — dense, factual, third-person.
-
+	Write in dense, structured, factual plain paragraphs. Focus on absolute precision. Be comprehensive — do not summarize at a high level or omit details to save space. We need a full-fledged record.
+	
 	## Hard Rules
-	- Never invent or assume facts not present in the conversation
-	- If something is unclear, omit it rather than guess
-	- Do not include filler phrases like "the conversation went well" — only concrete facts and observed signals
-	- Do not summarize what "[HOST]" is — only what happened in THIS conversation
+	- Carry forward all context from the Previous Summary. DO NOT lose any details about the user's life, friends, pets, or host facts.
+	- Never invent facts.
+	- Do not use vague filler sentences like "they had a pleasant talk". Instead, write concrete details: "They discussed their favorite weekend movies and the user mentioned seeing their sister on Sunday."
 	`
 
 	if prevContext != "" {
@@ -181,30 +183,16 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 	prompt += "\n" + "## Conversation to Summarize" + "\n" + body
 
 	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
-	modelName, _, summaryModel, contextSize, requestTimeout := chat.ParseModelConfig(modelValue, chat.DefaultModel)
+	cfg := chat.ParseModelConfig(modelValue, chat.DefaultModel)
 
-	if contextSize <= 0 {
-		contextSize = 30000
-	}
+	summaryClient, summaryModel, summaryCtxSize := w.Engine.ResolveLLMClient(conversationID, conv.IntegrationID, cfg.Summary, cfg.Chat.Model, cfg.RequestTimeout)
 
-	// Use summary_model if explicitly configured, otherwise fallback to summary_model from modelValue, otherwise the general model
-	finalModel := w.Store.ResolveConfig(conversationID, conv.IntegrationID, "summary_model", "")
-	if finalModel == "" {
-		finalModel = summaryModel
-	}
-	if finalModel == "" {
-		finalModel = modelName
-	}
+	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Generating summary with "+summaryModel, "")
 
-	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Generating summary with "+finalModel, "")
-
-	baseURL := w.Store.GetConfigValue("llm_url", w.Engine.LLMURL)
-	apiKey := w.Store.GetConfigValue("llm_key", "")
-	client := w.Engine.NewLLM(baseURL, apiKey, time.Duration(requestTimeout)*time.Second)
-	reply, stats, err := client.Chat(ctx, finalModel, []llm.Message{
-		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific and structured. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
+	reply, stats, err := summaryClient.Chat(ctx, summaryModel, []llm.Message{
+		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific, highly detailed, and structured. You must write an all-inclusive profile and summary containing every single specific detail, personal fact, name, place, and event mentioned by either user. Never drop details from past memories. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
-	}, contextSize)
+	}, summaryCtxSize)
 	if err != nil {
 		log.Printf("[ERROR] Summarization failed for conversation %s: %v", conversationID, err)
 		_ = w.Store.UpdateActivityLog(logID, "failure", err.Error(), "")

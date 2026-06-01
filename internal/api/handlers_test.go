@@ -213,7 +213,6 @@ func TestIdentityLinksCRUD(t *testing.T) {
 	}
 }
 
-
 func apiStore(t *testing.T, h http.Handler) *db.Store {
 	t.Helper()
 	if s, ok := storeRegistry[h]; ok {

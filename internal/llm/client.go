@@ -12,8 +12,15 @@ import (
 )
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string         `json:"role"`
+	Content string         `json:"content"`
+	Images  []string       `json:"images,omitempty"`
+	Audios  []AudioContent `json:"audios,omitempty"`
+}
+
+type AudioContent struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
 }
 
 type Stats struct {
@@ -120,9 +127,71 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		}
 		url += "/chat/completions"
 	}
+
+	type openAIImageURL struct {
+		URL string `json:"url"`
+	}
+	type openAIAudio struct {
+		Data   string `json:"data"`
+		Format string `json:"format"`
+	}
+	type openAIMessagePart struct {
+		Type       string          `json:"type"`
+		Text       string          `json:"text,omitempty"`
+		ImageURL   *openAIImageURL `json:"image_url,omitempty"`
+		InputAudio *openAIAudio    `json:"input_audio,omitempty"`
+	}
+	type openAIMessage struct {
+		Role    string      `json:"role"`
+		Content interface{} `json:"content"`
+	}
+
+	var openAIMsgs []openAIMessage
+	for _, m := range msgs {
+		if len(m.Images) > 0 || len(m.Audios) > 0 {
+			parts := []openAIMessagePart{}
+			if m.Content != "" {
+				parts = append(parts, openAIMessagePart{
+					Type: "text",
+					Text: m.Content,
+				})
+			}
+			for _, img := range m.Images {
+				prefix := ""
+				if !strings.HasPrefix(img, "data:") {
+					prefix = "data:image/jpeg;base64,"
+				}
+				parts = append(parts, openAIMessagePart{
+					Type: "image_url",
+					ImageURL: &openAIImageURL{
+						URL: prefix + img,
+					},
+				})
+			}
+			for _, aud := range m.Audios {
+				parts = append(parts, openAIMessagePart{
+					Type: "input_audio",
+					InputAudio: &openAIAudio{
+						Data:   aud.Data,
+						Format: aud.Format,
+					},
+				})
+			}
+			openAIMsgs = append(openAIMsgs, openAIMessage{
+				Role:    m.Role,
+				Content: parts,
+			})
+		} else {
+			openAIMsgs = append(openAIMsgs, openAIMessage{
+				Role:    m.Role,
+				Content: m.Content,
+			})
+		}
+	}
+
 	body, _ := json.Marshal(map[string]interface{}{
 		"model":    model,
-		"messages": msgs,
+		"messages": openAIMsgs,
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -207,4 +276,5 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	return names, nil
 }
+
 
