@@ -4,6 +4,136 @@ import Spinner from "../components/Spinner";
 import { apiGet, getToken } from "../lib/api";
 import { useResource } from "../lib/hooks";
 
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // result is "data:<mime>;base64,<data>" – strip the prefix
+      const b64 = reader.result.split(",")[1];
+      resolve(b64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── AttachmentPreview (compact strip shown before sending) ──────────────────
+
+function AttachmentPreview({ file, objectUrl, onClear }) {
+  const isImage = file.type.startsWith("image/");
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        background: "var(--surface)",
+        borderTop: "1px solid var(--border)",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      {isImage ? (
+        <img
+          src={objectUrl}
+          alt="preview"
+          style={{
+            height: 48,
+            width: 48,
+            objectFit: "cover",
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 6,
+            background: "var(--accent-dim, #1e2a3a)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 22,
+            border: "1px solid var(--border)",
+          }}
+        >
+          🎙️
+        </div>
+      )}
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--text)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {file.name}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>
+          {file.type} · {(file.size / 1024).toFixed(1)} KB
+        </div>
+        {!isImage && (
+          <audio
+            src={objectUrl}
+            controls
+            style={{ height: 24, marginTop: 4, width: "100%" }}
+          />
+        )}
+      </div>
+      <button
+        className="btn btn-secondary btn-sm"
+        onClick={onClear}
+        title="Remove attachment"
+        style={{ flexShrink: 0 }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ─── BubbleAttachment (shown inside a sent bubble) ────────────────────────────
+
+function BubbleAttachment({ mediaType, mediaData }) {
+  if (!mediaData || !mediaType) return null;
+  const src = `data:${mediaType};base64,${mediaData}`;
+  if (mediaType.startsWith("image/")) {
+    return (
+      <img
+        src={src}
+        alt="attachment"
+        style={{
+          display: "block",
+          maxWidth: 180,
+          maxHeight: 140,
+          borderRadius: 6,
+          marginBottom: 4,
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      />
+    );
+  }
+  if (mediaType.startsWith("audio/")) {
+    return (
+      <div style={{ marginBottom: 4 }}>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginRight: 4 }}>🎙️</span>
+        <audio src={src} controls style={{ height: 24, verticalAlign: "middle", maxWidth: 200 }} />
+      </div>
+    );
+  }
+  return null;
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function ChatTest() {
   const [intS] = useResource(() => apiGet("/integrations"), []);
   const [selInt, setSelInt] = useState("");
@@ -14,8 +144,14 @@ export default function ChatTest() {
   const [bubbles, setBubbles] = useState([]);
   const [sending, setSending] = useState(false);
   const [showJson, setShowJson] = useState(false);
-  const bottomRef = useRef(null);
 
+  // ── attachment state ──────────────────────────────────────────────────────
+  const [attachFile, setAttachFile] = useState(null);   // File object
+  const [attachUrl, setAttachUrl] = useState(null);     // object URL for preview
+  const [attachB64, setAttachB64] = useState(null);     // base64 string
+  const fileInputRef = useRef(null);
+
+  const bottomRef = useRef(null);
   const intList = intS.data || [];
   const selected = intList.find((i) => i.id === selInt);
 
@@ -23,24 +159,64 @@ export default function ChatTest() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [bubbles]);
 
+  // Clean up object URL when attachment changes
+  useEffect(() => {
+    return () => {
+      if (attachUrl) URL.revokeObjectURL(attachUrl);
+    };
+  }, [attachUrl]);
+
+  function clearAttachment() {
+    if (attachUrl) URL.revokeObjectURL(attachUrl);
+    setAttachFile(null);
+    setAttachUrl(null);
+    setAttachB64(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    setAttachFile(file);
+    setAttachUrl(url);
+    try {
+      const b64 = await readFileAsBase64(file);
+      setAttachB64(b64);
+    } catch {
+      setAttachB64(null);
+    }
+  }
+
   async function send() {
     const text = msg.trim();
-    if (!text || !selected || !chatId.trim()) return;
+    const hasMedia = !!(attachB64 && attachFile);
+    if ((!text && !hasMedia) || !selected || !chatId.trim()) return;
+
     setSending(true);
-    setMsg("");
     const now = new Date();
     const time_iso = now.toISOString();
     const time_str = now.toLocaleTimeString();
     const msgId = "test_" + now.getTime();
+
+    // Snapshot attachment so the bubble keeps its own copy
+    const sentMediaData = attachB64 || null;
+    const sentMediaType = attachFile?.type || null;
+    const sentText = text || (hasMedia ? `[${attachFile.type.startsWith("image/") ? "Image" : "Voice Note"}]` : "");
+
+    setMsg("");
+    clearAttachment();
 
     setBubbles((b) => [
       ...b,
       {
         id: msgId,
         type: "out",
-        text,
+        text: sentText,
+        mediaData: sentMediaData,
+        mediaType: sentMediaType,
         time: time_str,
-        time_iso: time_iso,
+        time_iso,
       },
     ]);
 
@@ -54,6 +230,7 @@ export default function ChatTest() {
         chat_type: chatType,
         message_id: msgId,
         timestamp: time_iso,
+        ...(sentMediaData && { media_data: sentMediaData, media_type: sentMediaType }),
         history: bubbles.map((b) => ({
           content: b.text,
           is_outbound: b.type === "in",
@@ -94,6 +271,8 @@ export default function ChatTest() {
     }
     setSending(false);
   }
+
+  // ─── render ────────────────────────────────────────────────────────────────
 
   return (
     <div>
@@ -137,11 +316,15 @@ export default function ChatTest() {
         </div>
         {selected && (
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
-            Target Endpoint: <code>/api/integrations/{selected.id}/conversations/{chatId}/auto-reply</code>
+            Target Endpoint:{" "}
+            <code>
+              /api/integrations/{selected.id}/conversations/{chatId}/auto-reply
+            </code>
           </div>
         )}
       </div>
 
+      {/* ── Chat window ─────────────────────────────────────────────────────── */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div
           style={{
@@ -159,19 +342,26 @@ export default function ChatTest() {
                 padding: 48,
               }}
             >
-              Type a message to test the webhook flow
+              Type a message or attach an image / voice note to test multimodal replies
             </div>
           ) : (
             <div className="bubbles">
               {bubbles.map((b) => (
                 <div
                   key={b.id}
-                  className={
-                    b.type === "out" ? "bubble-wrap-out" : "bubble-wrap-in"
-                  }
+                  className={b.type === "out" ? "bubble-wrap-out" : "bubble-wrap-in"}
                 >
                   <div>
-                    <div className={`bubble bubble-${b.type}`}>{b.text}</div>
+                    <div className={`bubble bubble-${b.type}`}>
+                      {/* Show attachment inline for sent bubbles */}
+                      {b.type === "out" && (
+                        <BubbleAttachment
+                          mediaType={b.mediaType}
+                          mediaData={b.mediaData}
+                        />
+                      )}
+                      {b.text}
+                    </div>
                     <div
                       className="bubble-time"
                       style={{ textAlign: b.type === "out" ? "right" : "left" }}
@@ -197,6 +387,17 @@ export default function ChatTest() {
             </div>
           )}
         </div>
+
+        {/* ── Attachment preview strip (shown only when a file is picked) ──── */}
+        {attachFile && (
+          <AttachmentPreview
+            file={attachFile}
+            objectUrl={attachUrl}
+            onClear={clearAttachment}
+          />
+        )}
+
+        {/* ── Input row ─────────────────────────────────────────────────────── */}
         <div
           style={{
             padding: 12,
@@ -206,13 +407,32 @@ export default function ChatTest() {
             alignItems: "center",
           }}
         >
+          {/* Hidden file input – accepts images and audio */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,audio/*"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <button
+            className="btn btn-secondary"
+            title="Attach image or voice note"
+            disabled={!selected || sending}
+            onClick={() => fileInputRef.current?.click()}
+            style={{ flexShrink: 0, fontSize: 18, padding: "4px 10px" }}
+          >
+            📎
+          </button>
           <input
             value={msg}
             onChange={(e) => setMsg(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
             placeholder={
               selected
-                ? "Type a message… (Enter to send)"
+                ? attachFile
+                  ? "Add a caption… (Enter to send)"
+                  : "Type a message… (Enter to send)"
                 : "Select an integration first"
             }
             disabled={!selected || sending}
@@ -221,22 +441,27 @@ export default function ChatTest() {
           <button
             className="btn btn-accent"
             onClick={send}
-            disabled={!selected || !msg.trim() || sending}
+            disabled={!selected || (!msg.trim() && !attachFile) || sending}
           >
             {sending ? <Spinner /> : "Send →"}
           </button>
           <button
             className="btn btn-secondary"
             title="Clear chat"
-            onClick={() => setBubbles([])}
+            onClick={() => { setBubbles([]); clearAttachment(); }}
           >
             🗑
           </button>
         </div>
+
+        {/* ── Footer options ────────────────────────────────────────────────── */}
         <div
           style={{
             padding: "6px 12px 10px",
             borderTop: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
           }}
         >
           <label
@@ -256,6 +481,9 @@ export default function ChatTest() {
             />
             Show raw JSON response
           </label>
+          <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
+            📎 Attach image or audio to test multimodal analysis
+          </span>
         </div>
       </div>
     </div>
