@@ -19,7 +19,7 @@ const testToken = "test-token-12345"
 
 type stubLLM struct{ Reply string }
 
-func (s *stubLLM) Chat(_ context.Context, _ string, _ []llm.Message, _ int) (string, llm.Stats, error) {
+func (s *stubLLM) Chat(_ context.Context, _ string, _ []llm.Message, _ int, _ llm.SamplingParams) (string, llm.Stats, error) {
 	return s.Reply, llm.Stats{}, nil
 }
 

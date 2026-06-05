@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +31,42 @@ type Stats struct {
 	DurationMs       int64 `json:"duration_ms"`
 }
 
+// SamplingParams holds generation sampling hyperparameters.
+// Zero values mean "use the caller's default" (defaults are applied in ResolveLLMClient).
+type SamplingParams struct {
+	Temperature       float64
+	TopP              float64
+	TopK              int
+	MinP              float64
+	RepetitionPenalty float64
+	// ThinkingLevel: "none" | "low" | "medium" | "high" | raw integer string (custom budget_tokens)
+	ThinkingLevel string
+}
+
+// thinkingBudget converts a ThinkingLevel string to a budget_tokens integer.
+// Returns -1 when thinking should be disabled (level == "none").
+// Returns 0 when no thinking config should be emitted (empty).
+func thinkingBudget(level string) int {
+	switch strings.ToLower(level) {
+	case "none":
+		return -1
+	case "low":
+		return 512
+	case "medium":
+		return 2048
+	case "high":
+		return 8192
+	case "":
+		return 0
+	default:
+		// Try to parse as a raw integer (custom budget)
+		if n, err := strconv.Atoi(level); err == nil && n > 0 {
+			return n
+		}
+		return 0
+	}
+}
+
 // Client speaks to either an Ollama server (POST /api/chat) or any OpenAI-compatible
 // endpoint (POST /v1/chat/completions).
 type Client struct {
@@ -51,11 +88,11 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
 
 // Chat sends messages to the model and returns the assistant reply.
 // Auto-detects Ollama vs OpenAI-compatible based on whether BaseURL contains "v1" or APIKey is set.
-func (c *Client) Chat(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
+func (c *Client) Chat(ctx context.Context, model string, msgs []Message, contextSize int, params SamplingParams) (string, Stats, error) {
 	if c.useOpenAI() {
-		return c.chatOpenAI(ctx, model, msgs, contextSize)
+		return c.chatOpenAI(ctx, model, msgs, contextSize, params)
 	}
-	return c.chatOllama(ctx, model, msgs, contextSize)
+	return c.chatOllama(ctx, model, msgs, contextSize, params)
 }
 
 // EstimateTokens provides a rough estimate of token count for a list of messages.
@@ -72,16 +109,22 @@ func (c *Client) useOpenAI() bool {
 	return c.APIKey != "" || strings.Contains(c.BaseURL, "/v1") || strings.Contains(c.BaseURL, "openai")
 }
 
-func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
+func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, contextSize int, params SamplingParams) (string, Stats, error) {
+	options := map[string]interface{}{
+		"temperature":    params.Temperature,
+		"top_p":          params.TopP,
+		"top_k":          params.TopK,
+		"min_p":          params.MinP,
+		"repeat_penalty": params.RepetitionPenalty,
+	}
+	if contextSize > 0 {
+		options["num_ctx"] = contextSize
+	}
 	payload := map[string]interface{}{
 		"model":    model,
 		"messages": msgs,
 		"stream":   false,
-	}
-	if contextSize > 0 {
-		payload["options"] = map[string]interface{}{
-			"num_ctx": contextSize,
-		}
+		"options":  options,
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewReader(body))
@@ -90,7 +133,7 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 	}
 	req.Header.Set("Content-Type", "application/json")
 	stats := Stats{PromptTokens: EstimateTokens(msgs)}
-	
+
 	start := time.Now()
 	resp, err := c.HTTP.Do(req)
 	duration := time.Since(start).Milliseconds()
@@ -103,9 +146,9 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 		return "", stats, fmt.Errorf("ollama %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
-		Message          Message `json:"message"`
-		PromptEvalCount  int     `json:"prompt_eval_count"`
-		EvalCount        int     `json:"eval_count"`
+		Message         Message `json:"message"`
+		PromptEvalCount int     `json:"prompt_eval_count"`
+		EvalCount       int     `json:"eval_count"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", stats, fmt.Errorf("decode: %w (body=%s)", err, string(raw))
@@ -119,7 +162,7 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 	return strings.TrimSpace(out.Message.Content), stats, nil
 }
 
-func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, contextSize int) (string, Stats, error) {
+func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, contextSize int, params SamplingParams) (string, Stats, error) {
 	url := c.BaseURL
 	if !strings.Contains(url, "/chat/completions") {
 		if !strings.Contains(url, "/v1") {
@@ -189,10 +232,31 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		}
 	}
 
-	body, _ := json.Marshal(map[string]interface{}{
-		"model":    model,
-		"messages": openAIMsgs,
-	})
+	reqBody := map[string]interface{}{
+		"model":              model,
+		"messages":           openAIMsgs,
+		"temperature":        params.Temperature,
+		"top_p":              params.TopP,
+		"top_k":              params.TopK,
+		"min_p":              params.MinP,
+		"repetition_penalty": params.RepetitionPenalty,
+	}
+
+	// Gemma 4 / thinking-capable models: inject thinking config
+	budget := thinkingBudget(params.ThinkingLevel)
+	if budget < 0 {
+		// Explicitly disable thinking
+		reqBody["thinking"] = map[string]interface{}{
+			"type": "disabled",
+		}
+	} else if budget > 0 {
+		reqBody["thinking"] = map[string]interface{}{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		}
+	}
+
+	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "", Stats{}, err
@@ -202,7 +266,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 	stats := Stats{PromptTokens: EstimateTokens(msgs)}
-	
+
 	start := time.Now()
 	resp, err := c.HTTP.Do(req)
 	duration := time.Since(start).Milliseconds()
@@ -276,5 +340,3 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	return names, nil
 }
-
-

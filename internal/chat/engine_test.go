@@ -14,7 +14,7 @@ import (
 
 type mockLLM struct{}
 
-func (m *mockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error) {
+func (m *mockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int, params llm.SamplingParams) (string, llm.Stats, error) {
 	return "mock reply", llm.Stats{}, nil
 }
 
@@ -170,7 +170,7 @@ type multiModalMockLLM struct {
 	modelsUsed []string
 }
 
-func (m *multiModalMockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error) {
+func (m *multiModalMockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int, params llm.SamplingParams) (string, llm.Stats, error) {
 	m.modelsUsed = append(m.modelsUsed, model)
 	for _, msg := range msgs {
 		if msg.Role == "user" && len(msg.Images) > 0 {

@@ -185,14 +185,14 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 	modelValue := w.Store.ResolveModel(conversationID, conv.IntegrationID, chat.DefaultModel)
 	cfg := chat.ParseModelConfig(modelValue, chat.DefaultModel)
 
-	summaryClient, summaryModel, summaryCtxSize := w.Engine.ResolveLLMClient(conversationID, conv.IntegrationID, cfg.Summary, cfg.Chat.Model, cfg.RequestTimeout)
+	summaryClient, summaryModel, summaryCtxSize, summaryParams := w.Engine.ResolveLLMClient(conversationID, conv.IntegrationID, cfg.Summary, cfg.Chat.Model, cfg.RequestTimeout)
 
 	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Generating summary with "+summaryModel, "")
 
 	reply, stats, err := summaryClient.Chat(ctx, summaryModel, []llm.Message{
 		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt to help it impersonate a real person. Be specific, highly detailed, and structured. You must write an all-inclusive profile and summary containing every single specific detail, personal fact, name, place, and event mentioned by either user. Never drop details from past memories. Never create a topic redirect list. Never suggest what the AI should steer the conversation toward. Just capture voice, relationship, facts, and recent thread accurately."},
 		{Role: "user", Content: prompt},
-	}, summaryCtxSize)
+	}, summaryCtxSize, summaryParams)
 	if err != nil {
 		log.Printf("[ERROR] Summarization failed for conversation %s: %v", conversationID, err)
 		_ = w.Store.UpdateActivityLog(logID, "failure", err.Error(), "")

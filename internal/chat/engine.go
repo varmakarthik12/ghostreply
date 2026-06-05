@@ -23,15 +23,21 @@ const DefaultModel = "llama3.2"
 type LLMClientFactory func(baseURL, apiKey string, timeout time.Duration) LLM
 
 type LLM interface {
-	Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int) (string, llm.Stats, error)
+	Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int, params llm.SamplingParams) (string, llm.Stats, error)
 	ListModels(ctx context.Context) ([]string, error)
 }
 
 type ModelSetting struct {
-	Model       string `json:"model"`
-	URL         string `json:"url,omitempty"`
-	APIKey      string `json:"api_key,omitempty"`
-	ContextSize int    `json:"context_size,omitempty"`
+	Model             string  `json:"model"`
+	URL               string  `json:"url,omitempty"`
+	APIKey            string  `json:"api_key,omitempty"`
+	ContextSize       int     `json:"context_size,omitempty"`
+	Temperature       float64 `json:"temperature,omitempty"`
+	TopP              float64 `json:"top_p,omitempty"`
+	TopK              int     `json:"top_k,omitempty"`
+	MinP              float64 `json:"min_p,omitempty"`
+	RepetitionPenalty float64 `json:"repetition_penalty,omitempty"`
+	ThinkingLevel     string  `json:"thinking_level,omitempty"` // "none"|"low"|"medium"|"high"|custom budget string
 }
 
 type ModelConfig struct {
@@ -157,7 +163,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	modelValue := e.Store.ResolveModel(conv.ID, req.IntegrationID, DefaultModel)
 	cfg := ParseModelConfig(modelValue, DefaultModel)
 
-	chatClient, chatModel, chatContextSize := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Chat, DefaultModel, cfg.RequestTimeout)
+	chatClient, chatModel, chatContextSize, chatParams := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Chat, DefaultModel, cfg.RequestTimeout)
 
 	// 4. Sync message history
 	for _, hm := range req.History {
@@ -201,7 +207,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 
 		if isAudio {
 			// Resolve voice client, model, and context window
-			voiceClient, voiceModel, voiceCtxSize := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Voice, "whisper-1", cfg.RequestTimeout)
+			voiceClient, voiceModel, voiceCtxSize, voiceParams := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Voice, "whisper-1", cfg.RequestTimeout)
 
 			_ = e.Store.UpdateActivityLog(logID, "in_progress", "Transcribing received voice note...", "")
 
@@ -229,7 +235,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				},
 			}
 
-			reply, _, err := voiceClient.Chat(ctx, voiceModel, analysisMsgs, voiceCtxSize)
+			reply, _, err := voiceClient.Chat(ctx, voiceModel, analysisMsgs, voiceCtxSize, voiceParams)
 			if err != nil {
 				log.Printf("[ERROR] Voice note analysis failed: %v", err)
 				mediaDescription = "Voice Note: (analysis failed)"
@@ -241,7 +247,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 			}
 		} else {
 			// Resolve image client, model, and context window
-			imageClient, imageModel, imageCtxSize := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Image, chatModel, cfg.RequestTimeout)
+			imageClient, imageModel, imageCtxSize, imageParams := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Image, chatModel, cfg.RequestTimeout)
 
 			_ = e.Store.UpdateActivityLog(logID, "in_progress", "Analyzing received image...", "")
 
@@ -260,7 +266,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				},
 			}
 
-			reply, _, err := imageClient.Chat(ctx, imageModel, analysisMsgs, imageCtxSize)
+			reply, _, err := imageClient.Chat(ctx, imageModel, analysisMsgs, imageCtxSize, imageParams)
 			if err != nil {
 				log.Printf("[ERROR] Media analysis failed: %v", err)
 			} else {
@@ -418,7 +424,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		log.Printf("[DEBUG] ConversationId=%s, LLM Messages: %v", req.ConversationID, msgs)
 	}
 
-	reply, stats, err := chatClient.Chat(ctx, chatModel, msgs, chatContextSize)
+	reply, stats, err := chatClient.Chat(ctx, chatModel, msgs, chatContextSize, chatParams)
 	if err != nil {
 		status := "failure"
 		errMsg := err.Error()
@@ -451,7 +457,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	return resp, nil
 }
 
-func (e *Engine) ResolveLLMClient(convID, integrationID string, setting ModelSetting, defaultModel string, globalTimeout int) (LLM, string, int) {
+func (e *Engine) ResolveLLMClient(convID, integrationID string, setting ModelSetting, defaultModel string, globalTimeout int) (LLM, string, int, llm.SamplingParams) {
 	url := setting.URL
 	if url == "" {
 		url = e.LLMURL
@@ -474,8 +480,36 @@ func (e *Engine) ResolveLLMClient(convID, integrationID string, setting ModelSet
 		timeout = time.Duration(globalTimeout) * time.Second
 	}
 
+	// Build sampling params with recommended defaults when not explicitly set
+	params := llm.SamplingParams{
+		Temperature:       setting.Temperature,
+		TopP:              setting.TopP,
+		TopK:              setting.TopK,
+		MinP:              setting.MinP,
+		RepetitionPenalty: setting.RepetitionPenalty,
+		ThinkingLevel:     setting.ThinkingLevel,
+	}
+	if params.Temperature == 0 {
+		params.Temperature = 1.15
+	}
+	if params.TopP == 0 {
+		params.TopP = 0.94
+	}
+	if params.TopK == 0 {
+		params.TopK = 64
+	}
+	if params.MinP == 0 {
+		params.MinP = 0.01
+	}
+	if params.RepetitionPenalty == 0 {
+		params.RepetitionPenalty = 1.15
+	}
+	if params.ThinkingLevel == "" {
+		params.ThinkingLevel = "high"
+	}
+
 	client := e.NewLLM(url, key, timeout)
-	return client, model, ctxSize
+	return client, model, ctxSize, params
 }
 
 func ParseModelConfig(value string, defaultModel string) ModelConfig {
