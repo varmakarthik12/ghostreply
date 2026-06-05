@@ -13,8 +13,8 @@ export default function LoadTable({
         <table>
           <thead>
             <tr>
-              {cols.map((c) => (
-                <th key={c}>{c}</th>
+              {cols.map((c, idx) => (
+                <th key={idx}>{c}</th>
               ))}
             </tr>
           </thead>
@@ -38,8 +38,8 @@ export default function LoadTable({
       <table>
         <thead>
           <tr>
-            {cols.map((c) => (
-              <th key={c}>{c}</th>
+            {cols.map((c, idx) => (
+              <th key={idx}>{c}</th>
             ))}
           </tr>
         </thead>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Badge from "../components/Badge";
 import LoadTable from "../components/LoadTable";
 import { apiDel, apiGet } from "../lib/api";
@@ -15,6 +15,14 @@ export default function Messages({ initialConv }) {
     [url],
   );
   const [selectedIds, setSelectedIds] = useState([]);
+
+  useEffect(() => {
+    if (!convId) return;
+    const interval = setInterval(() => {
+      reload();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [convId, reload]);
 
   async function del(id) {
     if (!window.confirm("Delete message?")) return;
@@ -56,8 +64,17 @@ export default function Messages({ initialConv }) {
 
   return (
     <div>
-      <div className="row">
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>📨 Messages</h2>
+        {convId && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={reload}
+            style={{ marginLeft: 8 }}
+          >
+            🔄 Refresh
+          </button>
+        )}
         {selectedIds.length > 0 && (
           <button className="btn btn-danger btn-sm" onClick={bulkDelete} style={{ marginLeft: 16 }}>
             Delete Selected ({selectedIds.length})
@@ -118,31 +135,34 @@ export default function Messages({ initialConv }) {
                 {r.content}
               </td>
               <td style={{ maxWidth: 280 }}>
-                {r.media_description ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text)",
-                      background: r.media_description.startsWith("Voice Note:")
-                        ? "#1a2a1a"
-                        : "#1a1e2e",
-                      border: "1px solid var(--border)",
-                      borderRadius: 6,
-                      padding: "4px 8px",
-                      wordBreak: "break-word",
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    <span style={{ marginRight: 4 }}>
-                      {r.media_description.startsWith("Voice Note:") ? "🎙️" : "🖼️"}
-                    </span>
-                    {r.media_description.startsWith("Voice Note:")
-                      ? r.media_description.replace(/^Voice Note:\s*/, "")
-                      : r.media_description}
-                  </div>
-                ) : (
-                  <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
-                )}
+                {(() => {
+                  const desc = r.media_description || r.MediaDescription;
+                  return desc ? (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text)",
+                        background: desc.startsWith("Voice Note:")
+                          ? "#1a2a1a"
+                          : "#1a1e2e",
+                        border: "1px solid var(--border)",
+                        borderRadius: 6,
+                        padding: "4px 8px",
+                        wordBreak: "break-word",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      <span style={{ marginRight: 4 }}>
+                        {desc.startsWith("Voice Note:") ? "🎙️" : "🖼️"}
+                      </span>
+                      {desc.startsWith("Voice Note:")
+                        ? desc.replace(/^Voice Note:\s*/, "")
+                        : desc}
+                    </div>
+                  ) : (
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
+                  );
+                })()}
               </td>
               <td
                 style={{

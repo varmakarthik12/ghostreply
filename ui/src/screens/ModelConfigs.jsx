@@ -26,7 +26,7 @@ const MODEL_SUGGESTIONS = [
   "gemini-2.0-flash",
 ];
 
-// Gemma 4 thinking level presets
+// Thinking level presets
 const THINKING_LEVEL_OPTIONS = [
   { value: "none",   label: "None (disabled)",   budget: 0   },
   { value: "low",    label: "Low  (~512 tokens)", budget: 512 },
@@ -126,7 +126,7 @@ const encodeModelSetting = (s) => {
 function ThinkingLevelField({ value, customBudget, onChange, onCustomBudgetChange }) {
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-      <Field label="🧠 Thinking Level (Gemma 4)" style={{ flex: 1, minWidth: 160 }}>
+      <Field label="🧠 Thinking Level" style={{ flex: 1, minWidth: 160 }}>
         <select value={value} onChange={(e) => onChange(e.target.value)}>
           {THINKING_LEVEL_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -224,7 +224,7 @@ function SamplingAccordion({ setting, onUpdate }) {
             </Field>
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
-            💡 Defaults tuned for Gemma 4 &amp; instruction-following models. Higher temperature + repetition penalty keeps replies natural and varied.
+            💡 Defaults tuned for thinking &amp; instruction-following models. Higher temperature + repetition penalty keeps replies natural and varied.
           </div>
         </div>
       )}

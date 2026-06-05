@@ -242,7 +242,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		"repetition_penalty": params.RepetitionPenalty,
 	}
 
-	// Gemma 4 / thinking-capable models: inject thinking config
+	// Thinking-capable models: inject thinking config
 	budget := thinkingBudget(params.ThinkingLevel)
 	if budget < 0 {
 		// Explicitly disable thinking
