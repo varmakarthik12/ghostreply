@@ -151,30 +151,19 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 	}
 
 	prompt := `
-	You are a conversation memory compression and profiling assistant. Your job is to read the previous summaries (if any) and the recent conversation history, then produce an updated, highly detailed, full-fledged summary profile. You MUST preserve ALL details, facts, names, events, and background info from the previous summaries. Do NOT drop anything unless it was explicitly contradicted in the new conversation.
+You are a conversation memory assistant. Read the previous summary (if any) and the recent conversation, then produce a concise updated summary.
 
-	## What You MUST Capture & Preserve (Do not miss any details):
-	1. Complete User Profile & Facts:
-	   - Full name, nickname, age, date of birth, location, home town, nationality, language(s).
-	   - Job/school details, career goals, daily routine, hobbies, music/media/food preferences.
-	   - Details of friends, family members, pets (names, stories, dynamics).
-	   - Explicit preferences, likes, dislikes, habits, unique quirks.
-	2. Relationship Progress & Vibe:
-	   - Exact relationship stage (strangers, acquaintances, friends, close friends, flirting, intimate).
-	   - Emotional tone (warm, cold, sarcastic, playful, cautious, flirty, deep).
-	   - Inside jokes, shared memories, recurring topics.
-	3. Host (Agent / "HOST") Profile Consistency:
-	   - Every single fact or story the HOST has told the user about themselves (hobbies, job, location, family, thoughts). Never contradict these in future replies.
-	4. Recent Thread & Pending Context:
-	   - What was discussed in the last few messages, unanswered questions, active plans, immediate mood, and how the conversation left off.
+Capture these key details (only what is known — skip unknowns):
+1. User: name, age, location, job/school, hobbies, preferences, family/friends/pets.
+2. Relationship: stage (strangers/friends/flirting/etc.), tone, inside jokes, recurring topics.
+3. Host facts: everything the HOST has shared about themselves — never contradict these.
+4. Recent context: last topics discussed, open questions, current mood.
 
-	## Output Format
-	Write in dense, structured, factual plain paragraphs. Focus on absolute precision. Be comprehensive — do not summarize at a high level or omit details to save space. We need a full-fledged record.
-	
-	## Hard Rules
-	- Carry forward all context from the Previous Summary. DO NOT lose any details about the user's life, friends, pets, or host facts.
-	- Never invent facts.
-	- Do not use vague filler sentences like "they had a pleasant talk". Instead, write concrete details: "They discussed their favorite weekend movies and the user mentioned seeing their sister on Sunday."
+Rules:
+- Keep the summary concise and skimmable — 150 to 250 words max.
+- Preserve all facts from the previous summary; never drop or contradict them.
+- Use specific details, not vague phrases like "they had a nice chat".
+- Never invent facts.
 	`
 
 	if prevContext != "" {
