@@ -160,7 +160,7 @@ Capture these key details (only what is known — skip unknowns):
 4. Recent context: last topics discussed, open questions, current mood.
 
 Rules:
-- Keep the summary concise and skimmable — 150 to 250 words max.
+- Keep the summary concise and skimmable — 2,000 to 2,500 words max.
 - Preserve all facts from the previous summary; never drop or contradict them.
 - Use specific details, not vague phrases like "they had a nice chat".
 - Never invent facts.
@@ -179,7 +179,7 @@ Rules:
 	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Generating summary with "+summaryModel, "")
 
 	reply, stats, err := summaryClient.Chat(ctx, summaryModel, []llm.Message{
-		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt. Write a concise, structured summary — 150 to 250 words maximum. Capture only the most important facts: user identity, relationship stage, host details, and recent context. Prioritize specifics over completeness. Never pad or repeat. Never invent facts."},
+		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt. Write a concise, structured summary — 2,000 to 2,500 words maximum. Capture only the most important facts: user identity, relationship stage, host details, and recent context. Prioritize specifics over completeness. Never pad or repeat. Never invent facts."},
 		{Role: "user", Content: prompt},
 	}, summaryCtxSize, summaryParams)
 	if err != nil {
