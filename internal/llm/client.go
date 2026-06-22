@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Message struct {
@@ -109,7 +110,28 @@ func (c *Client) useOpenAI() bool {
 	return c.APIKey != "" || strings.Contains(c.BaseURL, "/v1") || strings.Contains(c.BaseURL, "openai")
 }
 
+// sanitizeUTF8 removes any byte sequences that are not valid UTF-8.
+// This prevents JSON marshal/parse failures when message content or persona
+// strings contain bytes from non-UTF-8 encodings (e.g. Latin-1, Windows-1252).
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "")
+}
+
+// sanitizeMessages returns a copy of msgs with all Content fields sanitized.
+func sanitizeMessages(msgs []Message) []Message {
+	out := make([]Message, len(msgs))
+	for i, m := range msgs {
+		out[i] = m
+		out[i].Content = sanitizeUTF8(m.Content)
+	}
+	return out
+}
+
 func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, contextSize int, params SamplingParams) (string, Stats, error) {
+	msgs = sanitizeMessages(msgs)
 	options := map[string]interface{}{
 		"temperature":    params.Temperature,
 		"top_p":          params.TopP,
@@ -163,6 +185,7 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 }
 
 func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, contextSize int, params SamplingParams) (string, Stats, error) {
+	msgs = sanitizeMessages(msgs)
 	url := c.BaseURL
 	if !strings.Contains(url, "/chat/completions") {
 		if !strings.Contains(url, "/v1") {
