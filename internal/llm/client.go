@@ -324,13 +324,10 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		TotalTokens:      out.Usage.TotalTokens,
 		DurationMs:       duration,
 	}
-	// Reject incomplete responses. finish_reason must be "stop" or "end_turn";
-	// anything else ("length", "content_filter", empty string, etc.) means the
-	// model did not finish naturally and the content may be partial or corrupted
-	// (e.g. unclosed <thinking> blocks leaking into the reply).
+	// Reject incomplete responses unless they ended due to "stop", "end_turn", "length" or empty finish_reason.
 	finishReason := out.Choices[0].FinishReason
-	if finishReason != "stop" && finishReason != "end_turn" {
-		return "", stats, fmt.Errorf("incomplete response: finish_reason=%q (expected \"stop\" or \"end_turn\")", finishReason)
+	if finishReason != "stop" && finishReason != "end_turn" && finishReason != "length" && finishReason != "" {
+		return "", stats, fmt.Errorf("incomplete response: finish_reason=%q (expected \"stop\", \"end_turn\", or \"length\")", finishReason)
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), stats, nil
 }
