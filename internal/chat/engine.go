@@ -69,7 +69,9 @@ type activeRequest struct {
 
 func NewEngine(store *db.Store, llmURL string, factory LLMClientFactory) *Engine {
 	if factory == nil {
-		factory = func(baseURL, apiKey string, timeout time.Duration) LLM { return llm.NewClient(baseURL, apiKey, timeout) }
+		factory = func(baseURL, apiKey string, timeout time.Duration) LLM {
+			return llm.NewClient(baseURL, apiKey, timeout)
+		}
 	}
 	return &Engine{
 		Store:  store,
@@ -243,8 +245,30 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 			}
 
 			// 1. First try dedicated audio transcription (e.g. Whisper endpoint /v1/audio/transcriptions)
-			transcript, _, err := voiceClient.TranscribeAudio(ctx, voiceModel, req.MediaData, format)
-			if err == nil && transcript != "" {
+			// For m4a/mp4 audio, try both format variants.
+			transcriptFormats := []string{format}
+			if format == "m4a" {
+				transcriptFormats = []string{"m4a", "mp4", "mp3"}
+			} else if format == "mp4" {
+				transcriptFormats = []string{"mp4", "m4a", "mp3"}
+			}
+
+			var transcript string
+			var transcriptErr error
+			for _, tryFormat := range transcriptFormats {
+				transcript, _, transcriptErr = voiceClient.TranscribeAudio(ctx, voiceModel, req.MediaData, tryFormat)
+				if transcriptErr == nil && transcript != "" {
+					if debugEnabled {
+						log.Printf("[DEBUG] Voice transcription succeeded with format=%s", tryFormat)
+					}
+					break
+				}
+				if debugEnabled {
+					log.Printf("[DEBUG] Voice transcription failed with format=%s: %v", tryFormat, transcriptErr)
+				}
+			}
+
+			if transcriptErr == nil && transcript != "" {
 				mediaDescription = "Voice Note: " + strings.TrimSpace(transcript)
 				if debugEnabled {
 					log.Printf("[DEBUG] Generated voice transcription via audio API: %s", mediaDescription)
@@ -272,7 +296,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 						log.Printf("[DEBUG] Generated voice transcription/summary via Chat API: %s", mediaDescription)
 					}
 				} else {
-					log.Printf("[WARN] Voice note audio analysis unavailable on model %s (transcribe err: %v, chat err: %v)", voiceModel, err, chatErr)
+					log.Printf("[WARN] Voice note audio analysis unavailable on model %s (transcribe err: %v, chat err: %v)", voiceModel, transcriptErr, chatErr)
 					// Graceful fallback description so persona stays in character and does not receive a broken analysis failure
 					mediaDescription = "Voice Note: [Voice message received]"
 				}
