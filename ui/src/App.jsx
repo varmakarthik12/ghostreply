@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Sidebar from "./components/Sidebar";
+import Navbar from "./components/Navbar";
+import CommandPalette from "./components/CommandPalette";
 import Spinner from "./components/Spinner";
 import ToastContainer from "./components/ToastContainer";
 import { clearToken, getToken } from "./lib/api";
@@ -16,6 +18,20 @@ import Summaries from "./screens/Summaries";
 import SystemPrompts from "./screens/SystemPrompts";
 import ActivityLogs from "./screens/ActivityLogs";
 
+const SCREEN_TITLES = {
+  dashboard: "Operations Dashboard",
+  integrations: "Messaging Integrations",
+  conversations: "Conversations & Threads",
+  messages: "Messages & Audit Logs",
+  prompts: "Persona System Prompts",
+  models: "Model Configurations",
+  summaries: "Long-Term Summaries",
+  logs: "Activity Logs & Traces",
+  links: "Unified Cross-Platform Identities",
+  settings: "Application Settings",
+  test: "Chat Test & Multimodal Playground",
+};
+
 export default function App() {
   const [screen, setScreen] = useState("dashboard");
   const [viewMsgConv, setViewMsgConv] = useState(null);
@@ -23,6 +39,9 @@ export default function App() {
   const [checking, setChecking] = useState(true);
   const [tokenPrefix, setTokenPrefix] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isCmdOpen, setIsCmdOpen] = useState(false);
+  const [serverStatus, setServerStatus] = useState("ok");
 
   useEffect(() => {
     const t = getToken();
@@ -30,30 +49,56 @@ export default function App() {
       setChecking(false);
       return;
     }
+
     fetch("/api/integrations", { headers: { Authorization: "Bearer " + t } })
       .then((r) => {
-        if (r.status !== 401) setSetupDone(true);
-        else clearToken();
+        if (r.status !== 401) {
+          setSetupDone(true);
+          setServerStatus("ok");
+        } else {
+          clearToken();
+        }
         setChecking(false);
       })
-      .catch(() => setChecking(false));
+      .catch(() => {
+        setServerStatus("error");
+        setChecking(false);
+      });
+
     fetch("/health")
       .then((r) => r.json())
-      .then((h) => setTokenPrefix(h.token_prefix || ""))
-      .catch(() => {});
+      .then((h) => {
+        setTokenPrefix(h.token_prefix || "");
+        if (h.status) setServerStatus(h.status === "ok" ? "ok" : "error");
+      })
+      .catch(() => setServerStatus("error"));
 
-    // Router
+    // Global Command Palette Shortcut (⌘K / Ctrl+K)
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCmdOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    // Browser History PopState
     const handlePopState = () => {
       const path = window.location.pathname.replace(/^\//, "") || "dashboard";
       setScreen(path);
     };
     window.addEventListener("popstate", handlePopState);
     handlePopState();
-    return () => window.removeEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, []);
 
   function handleConnect() {
     setSetupDone(true);
+    setServerStatus("ok");
     fetch("/health")
       .then((r) => r.json())
       .then((h) => setTokenPrefix(h.token_prefix || ""))
@@ -71,7 +116,7 @@ export default function App() {
       window.history.pushState(null, "", path);
     }
     setScreen(id);
-    setIsSidebarOpen(false); // Close sidebar on navigate (mobile)
+    setIsSidebarOpen(false);
     if (id !== "messages") setViewMsgConv(null);
   }
 
@@ -89,14 +134,17 @@ export default function App() {
       <div
         style={{
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           height: "100vh",
           width: "100%",
-          gap: 12,
+          gap: 16,
+          background: "var(--bg-app)",
         }}
       >
-        <Spinner lg /> <span style={{ color: "var(--muted)" }}>Loading…</span>
+        <Spinner lg />
+        <span style={{ color: "var(--text-muted)", fontSize: 13 }}>Initializing GhostReply…</span>
       </div>
     );
   }
@@ -113,7 +161,7 @@ export default function App() {
   function renderScreen() {
     switch (screen) {
       case "dashboard":
-        return <Dashboard />;
+        return <Dashboard onNavigate={navigate} />;
       case "integrations":
         return <Integrations />;
       case "conversations":
@@ -135,28 +183,29 @@ export default function App() {
       case "test":
         return <ChatTest />;
       default:
-        return <Dashboard />;
+        return <Dashboard onNavigate={navigate} />;
     }
   }
 
   return (
-    <>
+    <div className="app-layout">
       <ToastContainer />
-      <header className="mobile-header">
-        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>
-          👻 GhostReply
-        </div>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => setIsSidebarOpen(true)}
-        >
-          Menu
-        </button>
-      </header>
+
+      {/* Global Command Palette */}
+      <CommandPalette
+        isOpen={isCmdOpen}
+        onClose={() => setIsCmdOpen(false)}
+        onNavigate={navigate}
+        onLogout={handleLogout}
+      />
+
+      {/* Mobile Backdrop */}
       <div
-        className={`sidebar-overlay${isSidebarOpen ? " visible" : ""}`}
+        className={`sidebar-backdrop${isSidebarOpen ? " open" : ""}`}
         onClick={() => setIsSidebarOpen(false)}
       />
+
+      {/* Modern Sidebar */}
       <Sidebar
         screen={screen}
         onNavigate={navigate}
@@ -164,8 +213,24 @@ export default function App() {
         onLogout={handleLogout}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
+        collapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
-      <main className="main">{renderScreen()}</main>
-    </>
+
+      {/* Main View Area */}
+      <div className="main-content-wrapper">
+        <Navbar
+          screen={screen}
+          screenTitle={SCREEN_TITLES[screen] || screen}
+          tokenPrefix={tokenPrefix}
+          onOpenCommandPalette={() => setIsCmdOpen(true)}
+          onOpenSidebar={() => setIsSidebarOpen(true)}
+          onLogout={handleLogout}
+          serverStatus={serverStatus}
+        />
+        <main className="main-viewport">{renderScreen()}</main>
+      </div>
+    </div>
   );
 }
+

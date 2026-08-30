@@ -1,26 +1,30 @@
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import { X } from "lucide-react";
 
-export default function Modal({
+export default function Drawer({
+  isOpen,
+  onClose,
   title,
   subtitle,
-  onClose,
   children,
   wide = false,
-  fullWidth = false,
+  footer = null,
 }) {
   useEffect(() => {
+    if (!isOpen) return;
     const handleKeyDown = (e) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="drawer-overlay" onClick={onClose}>
       <div
-        className={`modal-dialog${wide ? " wide" : ""}${fullWidth ? " full-width" : ""}`}
+        className={`drawer-panel${wide ? " wide" : ""}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header-bar">
@@ -42,8 +46,8 @@ export default function Modal({
           </button>
         </div>
         <div className="modal-body-scroll">{children}</div>
+        {footer && <div className="modal-footer-bar">{footer}</div>}
       </div>
     </div>
   );
 }
-

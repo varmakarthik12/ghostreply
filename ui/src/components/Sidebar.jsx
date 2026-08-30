@@ -1,16 +1,55 @@
+import React from "react";
+import {
+  LayoutDashboard,
+  Plug,
+  MessageSquare,
+  Send,
+  Sparkles,
+  Bot,
+  FileText,
+  Activity,
+  Link2,
+  Settings,
+  FlaskConical,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  Ghost,
+} from "lucide-react";
 
-const NAV = [
-  { id: "dashboard", icon: "🏠", label: "Dashboard" },
-  { id: "integrations", icon: "🔌", label: "Integrations" },
-  { id: "conversations", icon: "💬", label: "Conversations" },
-  { id: "messages", icon: "📨", label: "Messages" },
-  { id: "prompts", icon: "🎭", label: "System Prompts" },
-  { id: "models", icon: "🤖", label: "Model Configs" },
-  { id: "summaries", icon: "📝", label: "Summaries" },
-  { id: "logs", icon: "📋", label: "Activity Logs" },
-  { id: "links", icon: "🔗", label: "Identity Links" },
-  { id: "settings", icon: "⚙️", label: "Settings" },
-  { id: "test", icon: "🧪", label: "Chat Test" },
+const NAV_SECTIONS = [
+  {
+    title: "Overview",
+    items: [
+      { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+      { id: "test", icon: FlaskConical, label: "Chat Test", badge: "AI" },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { id: "integrations", icon: Plug, label: "Integrations" },
+      { id: "conversations", icon: MessageSquare, label: "Conversations" },
+      { id: "messages", icon: Send, label: "Messages" },
+      { id: "summaries", icon: FileText, label: "Summaries" },
+    ],
+  },
+  {
+    title: "Intelligence",
+    items: [
+      { id: "prompts", icon: Sparkles, label: "System Prompts" },
+      { id: "models", icon: Bot, label: "Model Configs" },
+      { id: "links", icon: Link2, label: "Unified Identities" },
+    ],
+  },
+  {
+    title: "System",
+    items: [
+      { id: "logs", icon: Activity, label: "Activity Logs" },
+      { id: "settings", icon: Settings, label: "Settings" },
+    ],
+  },
 ];
 
 export default function Sidebar({
@@ -20,53 +59,102 @@ export default function Sidebar({
   onLogout,
   isOpen,
   onClose,
+  collapsed = false,
+  onToggleCollapse,
 }) {
   return (
-    <div className={`sidebar${isOpen ? " open" : ""}`}>
-      <div className="sidebar-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div className="sidebar-logo" style={{ border: "none", marginBottom: 0, paddingBottom: 8 }}>👻 GhostReply</div>
-        <button 
-          className="btn btn-secondary btn-sm mobile-only" 
+    <aside className={`app-sidebar${isOpen ? " open" : ""}${collapsed ? " collapsed" : ""}`}>
+      {/* ── Brand / Header ── */}
+      <div className="sidebar-brand">
+        <div className="brand-title">
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "var(--radius-md)",
+              background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff",
+              boxShadow: "0 0 15px -2px var(--primary-glow)",
+              flexShrink: 0,
+            }}
+          >
+            <Ghost size={20} />
+          </div>
+          {!collapsed && (
+            <>
+              <span>GhostReply</span>
+              <span className="brand-badge">v1.0</span>
+            </>
+          )}
+        </div>
+
+        <button
+          className="btn btn-ghost btn-icon-only btn-sm mobile-only"
           onClick={onClose}
-          style={{ display: "none" }}
+          style={{ display: "none", color: "var(--text-muted)" }}
         >
-          ✕
+          <X size={18} />
         </button>
       </div>
-      <nav style={{ marginTop: 8 }}>
-        {NAV.map((n) => (
-          <div
-            key={n.id}
-            className={`nav-item${screen === n.id ? " active" : ""}`}
-            onClick={() => onNavigate(n.id)}
-          >
-            <span>{n.icon}</span>
-            <span>{n.label}</span>
+
+      {/* ── Navigation Sections ── */}
+      <div className="sidebar-nav-scroll">
+        {NAV_SECTIONS.map((sec) => (
+          <div key={sec.title} className="nav-group">
+            {!collapsed && <div className="nav-section-title">{sec.title}</div>}
+            {sec.items.map((item) => {
+              const Icon = item.icon;
+              const isActive = screen === item.id;
+              return (
+                <button
+                  key={item.id}
+                  className={`nav-link-btn${isActive ? " active" : ""}`}
+                  onClick={() => onNavigate(item.id)}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <div className="nav-icon">
+                    <Icon size={18} />
+                  </div>
+                  {!collapsed && (
+                    <>
+                      <span style={{ flex: 1 }}>{item.label}</span>
+                      {item.badge && <span className="nav-counter-pill">{item.badge}</span>}
+                    </>
+                  )}
+                </button>
+              );
+            })}
           </div>
         ))}
-      </nav>
-      <div className="sidebar-footer">
-        {tokenPrefix && (
-          <div style={{ marginBottom: 6 }}>
-            Token: <code>{tokenPrefix}…</code>
+      </div>
+
+      {/* ── Sidebar Footer ── */}
+      <div className="sidebar-footer-card">
+        {!collapsed && tokenPrefix && (
+          <div style={{ marginBottom: 10, fontSize: 12, color: "var(--text-muted)" }}>
+            <div style={{ fontSize: 11, color: "var(--text-subtle)", marginBottom: 2 }}>Connected Token</div>
+            <code>{tokenPrefix}…</code>
           </div>
         )}
         <button
           className="btn btn-secondary btn-sm"
           style={{ width: "100%", justifyContent: "center" }}
           onClick={onLogout}
+          title="Change token or switch accounts"
         >
-          Change Token
+          <LogOut size={14} />
+          {!collapsed && <span>Change Token</span>}
         </button>
       </div>
+
       <style>{`
         @media (max-width: 768px) {
-          .mobile-only { display: block !important; }
-          .sidebar-logo { border-bottom: none !important; }
+          .mobile-only { display: flex !important; }
         }
       `}</style>
-    </div>
+    </aside>
   );
 }
-
-export { NAV };
