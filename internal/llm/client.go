@@ -198,8 +198,9 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 	type openAIImageURL struct {
 		URL string `json:"url"`
 	}
-	type openAIVideoURL struct {
-		URL string `json:"url"`
+	type openAIVideo struct {
+		Data   string `json:"data"`
+		Format string `json:"format,omitempty"`
 	}
 	type openAIAudio struct {
 		Data   string `json:"data"`
@@ -209,7 +210,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		Type       string          `json:"type"`
 		Text       string          `json:"text,omitempty"`
 		ImageURL   *openAIImageURL `json:"image_url,omitempty"`
-		VideoURL   *openAIVideoURL `json:"video_url,omitempty"`
+		InputVideo *openAIVideo    `json:"input_video,omitempty"`
 		InputAudio *openAIAudio    `json:"input_audio,omitempty"`
 	}
 	type openAIMessage struct {
@@ -240,14 +241,23 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 				})
 			}
 			for _, vid := range m.Videos {
-				prefix := ""
-				if !strings.HasPrefix(vid, "data:") {
-					prefix = "data:video/mp4;base64,"
+				data := vid
+				format := "mp4"
+				if strings.HasPrefix(vid, "data:") {
+					partsData := strings.SplitN(vid, ";base64,", 2)
+					if len(partsData) == 2 {
+						mime := strings.TrimPrefix(partsData[0], "data:")
+						if strings.HasPrefix(mime, "video/") {
+							format = strings.TrimPrefix(mime, "video/")
+						}
+						data = partsData[1]
+					}
 				}
 				parts = append(parts, openAIMessagePart{
-					Type: "video_url",
-					VideoURL: &openAIVideoURL{
-						URL: prefix + vid,
+					Type: "input_video",
+					InputVideo: &openAIVideo{
+						Data:   data,
+						Format: format,
 					},
 				})
 			}
