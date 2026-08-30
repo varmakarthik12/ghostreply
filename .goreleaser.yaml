@@ -17,6 +17,11 @@ builds:
       - arm64
     main: ./cmd/ghostreply
     binary: ghostreply
+    ldflags:
+      - -s -w
+      - -X github.com/varmakarthik12/ghostreply/internal/api.Version={{.Version}}
+      - -X github.com/varmakarthik12/ghostreply/internal/api.Commit={{.Commit}}
+      - -X github.com/varmakarthik12/ghostreply/internal/api.BuildDate={{.Date}}
 
 archives:
   - format: tar.gz

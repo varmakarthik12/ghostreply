@@ -16,6 +16,8 @@ import {
   ChevronUp,
   Brain,
   Zap,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import Alert from "../components/Alert";
 import Badge from "../components/Badge";
@@ -150,95 +152,116 @@ function SamplingSliders({ setting, onUpdate }) {
       onUpdate("temperature", 0.8);
       onUpdate("top_p", 0.9);
       onUpdate("repetition_penalty", 1.1);
-    } else if (preset === "precise") {
-      onUpdate("temperature", 0.3);
-      onUpdate("top_p", 0.7);
+    } else if (preset === "strict") {
+      onUpdate("temperature", 0.2);
+      onUpdate("top_p", 0.8);
       onUpdate("repetition_penalty", 1.05);
     }
+    toast(`Applied "${preset}" preset`);
   };
 
   return (
-    <div style={{ marginTop: 12 }}>
+    <div style={{ marginTop: 12, borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
       <button
         type="button"
         className="btn btn-ghost btn-xs"
         onClick={() => setOpen(!open)}
-        style={{ color: "var(--text-muted)", padding: "4px 0", gap: 6 }}
+        style={{ width: "100%", justifyContent: "space-between", color: "var(--text-muted)" }}
       >
-        <Sliders size={13} />
-        <span>{open ? "Hide" : "Configure"} Advanced Sampling Parameters</span>
-        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+          <Sliders size={13} color="var(--primary)" />
+          <span>Advanced Sampling Parameters & Hyperparameters</span>
+        </span>
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
 
       {open && (
-        <div
-          style={{
-            background: "rgba(0,0,0,0.2)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-md)",
-            padding: 16,
-            marginTop: 8,
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
-          }}
-        >
-          {/* Preset Buttons */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Presets:</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginRight: 4 }}>Presets:</span>
             <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("creative")}>
-              🎨 Creative
+              🎨 Creative (1.25)
             </button>
             <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("balanced")}>
-              ⚖️ Balanced
+              ⚖️ Balanced (0.8)
             </button>
-            <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("precise")}>
-              🎯 Strict
+            <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("strict")}>
+              🎯 Strict (0.2)
             </button>
           </div>
 
           <div className="grid-2">
-            <Field label={`Temperature: ${setting.temperature ?? SAMPLING_DEFAULTS.temperature}`}>
+            <div>
+              <div className="flex-row-between" style={{ marginBottom: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>Temperature</label>
+                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                  {setting.temperature}
+                </span>
+              </div>
               <input
                 type="range"
                 min="0"
                 max="2"
                 step="0.05"
-                value={setting.temperature ?? SAMPLING_DEFAULTS.temperature}
+                value={setting.temperature}
                 onChange={(e) => onUpdate("temperature", parseFloat(e.target.value))}
+                style={{ width: "100%" }}
               />
-            </Field>
+            </div>
 
-            <Field label={`Top P: ${setting.top_p ?? SAMPLING_DEFAULTS.top_p}`}>
+            <div>
+              <div className="flex-row-between" style={{ marginBottom: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>Top P (Nucleus Sampling)</label>
+                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                  {setting.top_p}
+                </span>
+              </div>
               <input
                 type="range"
                 min="0"
                 max="1"
-                step="0.02"
-                value={setting.top_p ?? SAMPLING_DEFAULTS.top_p}
+                step="0.01"
+                value={setting.top_p}
                 onChange={(e) => onUpdate("top_p", parseFloat(e.target.value))}
+                style={{ width: "100%" }}
               />
-            </Field>
+            </div>
 
-            <Field label={`Repetition Penalty: ${setting.repetition_penalty ?? SAMPLING_DEFAULTS.repetition_penalty}`}>
+            <div>
+              <div className="flex-row-between" style={{ marginBottom: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>Repetition Penalty</label>
+                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                  {setting.repetition_penalty}
+                </span>
+              </div>
               <input
                 type="range"
-                min="1"
+                min="0.9"
                 max="2"
                 step="0.05"
-                value={setting.repetition_penalty ?? SAMPLING_DEFAULTS.repetition_penalty}
+                value={setting.repetition_penalty}
                 onChange={(e) => onUpdate("repetition_penalty", parseFloat(e.target.value))}
+                style={{ width: "100%" }}
               />
-            </Field>
+            </div>
 
-            <Field label={`Top K: ${setting.top_k ?? SAMPLING_DEFAULTS.top_k}`}>
+            <div>
+              <div className="flex-row-between" style={{ marginBottom: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>Top K</label>
+                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                  {setting.top_k}
+                </span>
+              </div>
               <input
-                type="number"
+                type="range"
                 min="0"
-                value={setting.top_k ?? SAMPLING_DEFAULTS.top_k}
-                onChange={(e) => onUpdate("top_k", parseInt(e.target.value) || 0)}
+                max="128"
+                step="1"
+                value={setting.top_k}
+                onChange={(e) => onUpdate("top_k", parseInt(e.target.value))}
+                style={{ width: "100%" }}
               />
-            </Field>
+            </div>
           </div>
         </div>
       )}
@@ -246,163 +269,150 @@ function SamplingSliders({ setting, onUpdate }) {
   );
 }
 
-function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
-  const initialValues = parseValue(init?.value);
+function CapabilitySection({ icon: Icon, title, desc, setting, onUpdate, suggestions }) {
+  return (
+    <div
+      style={{
+        background: "rgba(255, 255, 255, 0.02)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)",
+        padding: "16px 20px",
+        marginBottom: 14,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "var(--radius-md)",
+            background: "rgba(99, 102, 241, 0.12)",
+            color: "var(--primary)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Icon size={16} />
+        </div>
+        <div>
+          <strong style={{ fontSize: 14, color: "var(--text-main)" }}>{title}</strong>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>{desc}</p>
+        </div>
+      </div>
 
-  const [f, setF] = useState({
-    scope: "global",
-    scope_id: "",
-    chat: initialValues.chat,
-    summary: initialValues.summary,
-    image: initialValues.image,
-    voice: initialValues.voice,
-    video: initialValues.video,
-    request_delay: initialValues.request_delay,
-    request_timeout: initialValues.request_timeout,
-    ...init,
-  });
+      <div className="grid-2">
+        <Field label="Model Name / Identifier" hint="e.g. llama3.2, gpt-4o, whisper-1">
+          <input
+            type="text"
+            list={`suggestions-${title}`}
+            value={setting.model}
+            onChange={(e) => onUpdate("model", e.target.value)}
+            placeholder="Inherit system default"
+          />
+          <datalist id={`suggestions-${title}`}>
+            {suggestions.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+        </Field>
+
+        <Field label="Reasoning / Thinking Level" hint="Extended CoT reasoning budget">
+          <select
+            value={setting.thinking_level}
+            onChange={(e) => onUpdate("thinking_level", e.target.value)}
+          >
+            {THINKING_LEVEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="grid-3" style={{ marginTop: 10 }}>
+        <Field label="Custom Base URL (Optional)" hint="e.g. http://localhost:11434">
+          <input
+            type="text"
+            value={setting.url}
+            onChange={(e) => onUpdate("url", e.target.value)}
+            placeholder="Inherit server default"
+          />
+        </Field>
+
+        <Field label="API Key (Optional)" hint="Bearer token if remote">
+          <input
+            type="password"
+            value={setting.api_key}
+            onChange={(e) => onUpdate("api_key", e.target.value)}
+            placeholder="sk-..."
+          />
+        </Field>
+
+        <Field label="Context Size (num_ctx)" hint="0 for model default">
+          <input
+            type="number"
+            value={setting.context_size || ""}
+            onChange={(e) => onUpdate("context_size", parseInt(e.target.value) || 0)}
+            placeholder="e.g. 32768"
+          />
+        </Field>
+      </div>
+
+      <SamplingSliders setting={setting} onUpdate={onUpdate} />
+    </div>
+  );
+}
+
+function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
+  const [scope, setScope] = useState(init?.scope || "global");
+  const [scopeId, setScopeId] = useState(init?.scope_id || "");
+  const [cfg, setCfg] = useState(() => parseValue(init?.value));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
-  const updateSetting = (type, field, val) => {
-    setF((prev) => ({
+  const updateCapability = (cap, field, val) => {
+    setCfg((prev) => ({
       ...prev,
-      [type]: {
-        ...(prev[type] || emptyModelSetting()),
+      [cap]: {
+        ...prev[cap],
         [field]: val,
       },
     }));
   };
 
+  const suggestions = Array.from(new Set([...MODEL_SUGGESTIONS, ...ollamaModels]));
+
   async function save() {
-    if (!f.chat || !f.chat.model.trim()) {
-      setErr("Primary Chat Model name is required.");
-      return;
-    }
     setSaving(true);
     setErr("");
     try {
-      const payload = {
-        ...f,
-        value: JSON.stringify({
-          chat: encodeModelSetting(f.chat),
-          summary: encodeModelSetting(f.summary),
-          image: encodeModelSetting(f.image),
-          voice: encodeModelSetting(f.voice),
-          video: encodeModelSetting(f.video),
-          request_delay: parseInt(f.request_delay) || 0,
-          request_timeout: parseInt(f.request_timeout) || 0,
-        }),
-      };
-      delete payload.chat;
-      delete payload.summary;
-      delete payload.image;
-      delete payload.voice;
-      delete payload.video;
-      delete payload.request_delay;
-      delete payload.request_timeout;
+      const payloadValue = JSON.stringify({
+        chat: encodeModelSetting(cfg.chat),
+        summary: encodeModelSetting(cfg.summary),
+        image: encodeModelSetting(cfg.image),
+        voice: encodeModelSetting(cfg.voice),
+        video: encodeModelSetting(cfg.video),
+        request_delay: cfg.request_delay,
+        request_timeout: cfg.request_timeout,
+      });
 
-      if (init?.id) await apiPut("/model-configs/" + init.id, payload);
-      else await apiPost("/model-configs", payload);
+      if (init?.id) {
+        await apiPut("/model-configs/" + init.id, { value: payloadValue });
+      } else {
+        await apiPost("/model-configs", {
+          scope,
+          scope_id: scopeId,
+          value: payloadValue,
+        });
+      }
       onSave();
     } catch (e) {
       setErr(e.message);
     }
     setSaving(false);
   }
-
-  const renderCapabilityCard = (type, title, Icon, isRequired = false, placeholder = "") => {
-    const s = f[type] || emptyModelSetting();
-    return (
-      <div className="glass-card" style={{ padding: 18, marginBottom: 14 }} key={type}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-          <div style={{ padding: 6, borderRadius: "var(--radius-sm)", background: "var(--primary-subtle)", color: "var(--primary)" }}>
-            <Icon size={18} />
-          </div>
-          <div>
-            <h4 style={{ margin: 0, fontSize: 14 }}>
-              {title} {isRequired && <span style={{ color: "var(--danger)" }}>*</span>}
-            </h4>
-            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-              {isRequired ? "Core model used for generating messaging replies" : "Optional override (falls back to Chat model if empty)"}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid-2">
-          <Field label="Model Name" required={isRequired}>
-            <input
-              list="models-datalist"
-              type="text"
-              value={s.model}
-              onChange={(e) => updateSetting(type, "model", e.target.value)}
-              placeholder={placeholder}
-            />
-          </Field>
-
-          <Field label="Custom Host URL" hint="Leave empty to use global default">
-            <input
-              type="text"
-              value={s.url}
-              onChange={(e) => updateSetting(type, "url", e.target.value)}
-              placeholder="e.g. http://localhost:11434"
-            />
-          </Field>
-
-          <Field label="API Key" hint="Leave empty for local Ollama">
-            <input
-              type="password"
-              value={s.api_key}
-              onChange={(e) => updateSetting(type, "api_key", e.target.value)}
-              placeholder="sk-… (optional)"
-            />
-          </Field>
-
-          <Field label="Context Size (tokens)" hint="0 for model default">
-            <input
-              type="number"
-              min="0"
-              value={s.context_size || ""}
-              onChange={(e) => updateSetting(type, "context_size", e.target.value)}
-              placeholder="e.g. 32768"
-            />
-          </Field>
-        </div>
-
-        {/* Reasoning / Thinking Level */}
-        <div style={{ marginTop: 12 }}>
-          <div className="grid-2">
-            <Field label="🧠 Reasoning / Thinking Level" hint="For DeepSeek-R1 / reasoning models">
-              <select
-                value={s.thinking_level || "high"}
-                onChange={(e) => updateSetting(type, "thinking_level", e.target.value)}
-              >
-                {THINKING_LEVEL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            {s.thinking_level === "custom" && (
-              <Field label="Custom Token Budget">
-                <input
-                  type="number"
-                  min="0"
-                  value={s._custom_thinking_budget}
-                  onChange={(e) => updateSetting(type, "_custom_thinking_budget", e.target.value)}
-                  placeholder="e.g. 4096"
-                />
-              </Field>
-            )}
-          </div>
-        </div>
-
-        <SamplingSliders setting={s} onUpdate={(k, v) => updateSetting(type, k, v)} />
-      </div>
-    );
-  };
 
   return (
     <>
@@ -413,88 +423,102 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
       )}
 
       {!init?.id && (
-        <div className="grid-2" style={{ marginBottom: 16 }}>
-          <Field label="Scope Level" required>
-            <select
-              value={f.scope}
-              onChange={(e) => setF({ ...f, scope: e.target.value, scope_id: "" })}
-            >
-              <option value="global">Global (Default for all)</option>
-              <option value="integration">Integration Override</option>
-              <option value="conversation">Conversation Override</option>
-            </select>
-          </Field>
-
-          {f.scope === "integration" && (
-            <Field label="Integration" required>
+        <div style={{ marginBottom: 16 }}>
+          <div className="grid-2">
+            <Field label="Scope Level" required hint="Where these model overrides apply">
               <select
-                value={f.scope_id}
-                onChange={(e) => setF({ ...f, scope_id: e.target.value })}
+                value={scope}
+                onChange={(e) => {
+                  setScope(e.target.value);
+                  setScopeId("");
+                }}
               >
-                <option value="">— Select Integration —</option>
-                {integrations.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.platform} · {i.account}
-                  </option>
-                ))}
+                <option value="global">Global (System Wide)</option>
+                <option value="integration">Specific Integration (e.g. WhatsApp / Telegram)</option>
+                <option value="conversation">Specific Conversation</option>
               </select>
             </Field>
-          )}
 
-          {f.scope === "conversation" && (
-            <Field label="Conversation UUID" required>
-              <input
-                type="text"
-                value={f.scope_id}
-                onChange={(e) => setF({ ...f, scope_id: e.target.value })}
-                placeholder="Conversation UUID"
-              />
-            </Field>
-          )}
+            {scope === "integration" && (
+              <Field label="Target Integration" required>
+                <select value={scopeId} onChange={(e) => setScopeId(e.target.value)}>
+                  <option value="">— Select Integration —</option>
+                  {integrations.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.platform} · {i.account}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+
+            {scope === "conversation" && (
+              <Field label="Conversation UUID" required>
+                <input
+                  type="text"
+                  value={scopeId}
+                  onChange={(e) => setScopeId(e.target.value)}
+                  placeholder="Paste conversation UUID"
+                />
+              </Field>
+            )}
+          </div>
         </div>
       )}
 
-      <datalist id="models-datalist">
-        {[...new Set([...(ollamaModels || []), ...MODEL_SUGGESTIONS])].map((m) => (
-          <option key={m} value={m} />
-        ))}
-      </datalist>
+      {/* ── Capability Cards ── */}
+      <CapabilitySection
+        icon={Bot}
+        title="Chat & Response Generation Engine"
+        desc="Primary engine used for crafting automated replies and conversation turns."
+        setting={cfg.chat}
+        onUpdate={(f, v) => updateCapability("chat", f, v)}
+        suggestions={suggestions}
+      />
 
-      {renderCapabilityCard("chat", "Chat Engine (Primary)", Bot, true, "llama3.2")}
-      {renderCapabilityCard("summary", "Summarization Worker", FileText, false, "mistral")}
-      {renderCapabilityCard("image", "Image / Vision Analysis", ImageIcon, false, "gpt-4o-mini")}
-      {renderCapabilityCard("voice", "Voice / Audio Transcription", Mic, false, "whisper-1")}
-      {renderCapabilityCard("video", "Video Clip Analysis", VideoIcon, false, "qwen2.5-vl:7b")}
+      <CapabilitySection
+        icon={FileText}
+        title="Long-Term Memory & Summarizer"
+        desc="Background engine for compressing old turns into persistent memory profiles."
+        setting={cfg.summary}
+        onUpdate={(f, v) => updateCapability("summary", f, v)}
+        suggestions={suggestions}
+      />
 
-      <div className="grid-2" style={{ marginTop: 16 }}>
-        <Field label="Pre-Reply Artificial Delay (seconds)" hint="Human-like typing delay">
-          <input
-            type="number"
-            min="0"
-            value={f.request_delay}
-            onChange={(e) => setF({ ...f, request_delay: e.target.value })}
-            placeholder="0"
-          />
-        </Field>
+      <CapabilitySection
+        icon={ImageIcon}
+        title="Vision & Image Analysis Engine"
+        desc="Multimodal visual model for inspecting user photos and snaps."
+        setting={cfg.image}
+        onUpdate={(f, v) => updateCapability("image", f, v)}
+        suggestions={suggestions}
+      />
 
-        <Field label="Request Timeout (seconds)" hint="Default: 300s">
-          <input
-            type="number"
-            min="0"
-            value={f.request_timeout}
-            onChange={(e) => setF({ ...f, request_timeout: e.target.value })}
-            placeholder="300"
-          />
-        </Field>
-      </div>
+      <CapabilitySection
+        icon={Mic}
+        title="Voice & Audio Transcription Engine"
+        desc="Dedicated speech model (e.g. Whisper-1) or multimodal audio model."
+        setting={cfg.voice}
+        onUpdate={(f, v) => updateCapability("voice", f, v)}
+        suggestions={suggestions}
+      />
 
-      <div className="modal-footer-bar" style={{ padding: "20px 0 0", background: "none", borderTop: "1px solid var(--border)", marginTop: 20 }}>
+      <CapabilitySection
+        icon={VideoIcon}
+        title="Video & Animation Analysis Engine"
+        desc="Video model for analyzing video clips and animations."
+        setting={cfg.video}
+        onUpdate={(f, v) => updateCapability("video", f, v)}
+        suggestions={suggestions}
+      />
+
+      <div className="modal-footer-bar">
         <button type="button" className="btn btn-secondary" onClick={onCancel}>
           Cancel
         </button>
         <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving && <Spinner />}
-          {init?.id ? "Save Model Config" : "Create Model Config"}
+          {saving ? <Spinner /> : <Cpu size={14} />}
+          <span>{init?.id ? "Update Configuration" : "Create Configuration"}</span>
         </button>
       </div>
     </>
@@ -507,6 +531,7 @@ export default function ModelConfigs() {
   const [ollamaS] = useResource(() => apiGet("/ollama/models"), []);
   const [modal, setModal] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [viewMode, setViewMode] = useState("cards"); // cards | table
 
   const integrations = intS.data || [];
   const ollamaModels = ollamaS.data || [];
@@ -615,27 +640,193 @@ export default function ModelConfigs() {
           </p>
         </div>
 
-        <button className="btn btn-primary" onClick={() => setModal({})}>
-          <Plus size={16} />
-          <span>Add Model Config</span>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              background: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: 3,
+            }}
+          >
+            <button
+              className={`btn btn-sm ${viewMode === "cards" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setViewMode("cards")}
+              style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
+              title="Card Grid View"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              className={`btn btn-sm ${viewMode === "table" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setViewMode("table")}
+              style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
+              title="Table View"
+            >
+              <List size={15} />
+            </button>
+          </div>
+
+          <button className="btn btn-primary" onClick={() => setModal({})}>
+            <Plus size={16} />
+            <span>Add Model Config</span>
+          </button>
+        </div>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={s.data || []}
-        loading={s.loading}
-        error={s.error}
-        searchPlaceholder="Search model configs…"
-        searchKeys={["scope", "scope_id"]}
-        emptyTitle="No custom model configs"
-        emptyDescription="System will use default local Ollama model (llama3.2) unless overridden."
-        emptyAction={
-          <button className="btn btn-primary btn-sm" onClick={() => setModal({})}>
-            <Plus size={14} /> Add Model Override
-          </button>
-        }
-      />
+      {viewMode === "table" ? (
+        <DataTable
+          columns={columns}
+          data={s.data || []}
+          loading={s.loading}
+          error={s.error}
+          searchPlaceholder="Search model configs…"
+          searchKeys={["scope", "scope_id"]}
+          emptyTitle="No custom model configs"
+          emptyDescription="System will use default local Ollama model (llama3.2) unless overridden."
+          emptyAction={
+            <button className="btn btn-primary btn-sm" onClick={() => setModal({})}>
+              <Plus size={14} /> Add Model Override
+            </button>
+          }
+        />
+      ) : (
+        /* ── Grid View ── */
+        <div>
+          {s.loading ? (
+            <div className="grid-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="glass-card" style={{ height: 220 }}>
+                  <div className="skeleton" style={{ width: "30%", height: 20, marginBottom: 16 }} />
+                  <div className="skeleton" style={{ width: "100%", height: 16, marginBottom: 8 }} />
+                  <div className="skeleton" style={{ width: "80%", height: 16 }} />
+                </div>
+              ))}
+            </div>
+          ) : (s.data || []).length === 0 ? (
+            <div className="glass-card" style={{ padding: "56px 24px", textAlign: "center" }}>
+              <div className="empty-state-box">
+                <div className="empty-state-icon">
+                  <Bot size={28} />
+                </div>
+                <div className="empty-state-title">No custom model configurations</div>
+                <div className="empty-state-desc">
+                  GhostReply will use default local model configurations unless specific model overrides are configured.
+                </div>
+                <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => setModal({})}>
+                  <Plus size={14} /> Create Configuration
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid-2">
+              {(s.data || []).map((r) => {
+                const cfg = parseValue(r.value);
+                return (
+                  <div key={r.id} className="glass-card glass-card-interactive" style={{ padding: 20, marginBottom: 0 }}>
+                    <div className="flex-row-between" style={{ marginBottom: 14 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Badge color={scopeColor(r.scope)} lg>
+                          {r.scope}
+                        </Badge>
+                        {r.scope_id && (
+                          <span className="mono" style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+                            ID: {shortId(r.scope_id)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          className="btn btn-secondary btn-xs"
+                          onClick={() => setModal(r)}
+                          title="Edit Configuration"
+                        >
+                          <Edit2 size={13} />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          className="btn btn-danger btn-xs"
+                          onClick={() => setDeleteConfirm(r)}
+                          title="Delete Configuration"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {/* Chat Engine */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          background: "rgba(255, 255, 255, 0.03)",
+                          borderRadius: "var(--radius-md)",
+                          border: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <Bot size={15} color="var(--primary)" />
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-main)" }}>Chat Engine:</span>
+                          <code style={{ fontSize: 12 }}>{cfg.chat.model || "Default"}</code>
+                        </div>
+                        {cfg.chat.thinking_level && cfg.chat.thinking_level !== "none" && (
+                          <Badge color="purple">🧠 {cfg.chat.thinking_level}</Badge>
+                        )}
+                      </div>
+
+                      {/* Multimodal Engines */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 12 }}>
+                        {cfg.summary.model && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(255,255,255,0.02)", borderRadius: 4, border: "1px solid var(--border-subtle)" }}>
+                            <FileText size={12} color="var(--primary)" />
+                            <span>Summary: <code>{cfg.summary.model}</code></span>
+                          </div>
+                        )}
+                        {cfg.image.model && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(255,255,255,0.02)", borderRadius: 4, border: "1px solid var(--border-subtle)" }}>
+                            <ImageIcon size={12} color="var(--accent)" />
+                            <span>Vision: <code>{cfg.image.model}</code></span>
+                          </div>
+                        )}
+                        {cfg.voice.model && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(255,255,255,0.02)", borderRadius: 4, border: "1px solid var(--border-subtle)" }}>
+                            <Mic size={12} color="var(--success)" />
+                            <span>Voice: <code>{cfg.voice.model}</code></span>
+                          </div>
+                        )}
+                        {cfg.video.model && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(255,255,255,0.02)", borderRadius: 4, border: "1px solid var(--border-subtle)" }}>
+                            <VideoIcon size={12} color="var(--purple)" />
+                            <span>Video: <code>{cfg.video.model}</code></span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Sampling Tags */}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                        <span style={{ padding: "2px 6px", background: "rgba(255,255,255,0.04)", borderRadius: 4 }}>
+                          Temp: <strong style={{ color: "var(--text-main)" }}>{cfg.chat.temperature}</strong>
+                        </span>
+                        <span style={{ padding: "2px 6px", background: "rgba(255,255,255,0.04)", borderRadius: 4 }}>
+                          TopP: <strong style={{ color: "var(--text-main)" }}>{cfg.chat.top_p}</strong>
+                        </span>
+                        <span style={{ padding: "2px 6px", background: "rgba(255,255,255,0.04)", borderRadius: 4 }}>
+                          RepPenalty: <strong style={{ color: "var(--text-main)" }}>{cfg.chat.repetition_penalty}</strong>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {modal && (
         <Modal

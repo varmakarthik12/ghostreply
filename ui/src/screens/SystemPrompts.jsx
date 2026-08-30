@@ -12,6 +12,9 @@ import {
   HelpCircle,
   Code,
   Sliders,
+  Eye,
+  Columns,
+  Maximize2,
 } from "lucide-react";
 import Alert from "../components/Alert";
 import Badge from "../components/Badge";
@@ -20,6 +23,7 @@ import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Spinner from "../components/Spinner";
+import MarkdownView from "../components/MarkdownView";
 import { apiDel, apiGet, apiPost, apiPut } from "../lib/api";
 import { useResource } from "../lib/hooks";
 import { toast } from "../lib/toast";
@@ -67,6 +71,7 @@ function PromptForm({ init, integrations, onSave, onCancel }) {
     text: "",
     ...init,
   });
+  const [editorTab, setEditorTab] = useState("split"); // "edit" | "preview" | "split"
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
@@ -116,7 +121,7 @@ function PromptForm({ init, integrations, onSave, onCancel }) {
                 value={f.scope}
                 onChange={(e) => setF({ ...f, scope: e.target.value, scope_id: "" })}
               >
-                <option value="global">Global (All Integrations)</option>
+                <option value="global">Global (All Integrations & Conversations)</option>
                 <option value="integration">Specific Integration (e.g. Telegram Bot)</option>
                 <option value="conversation">Specific Conversation Thread</option>
               </select>
@@ -173,19 +178,135 @@ function PromptForm({ init, integrations, onSave, onCancel }) {
         </div>
       </div>
 
-      {/* ── Persona Textarea ── */}
-      <Field
-        label="Persona Instructions (System Prompt)"
-        required
-        hint={`${words} words · ${chars} chars · ~${estTokens} tokens`}
-      >
-        <textarea
-          value={f.text}
-          onChange={(e) => setF({ ...f, text: e.target.value })}
-          placeholder="You are Alex, a 28-year-old software engineer. You are casual, use abbreviations, reply briefly. Do not reveal you are an AI."
-          style={{ minHeight: 180, fontFamily: "inherit" }}
-        />
-      </Field>
+      {/* ── Editor Toolbar & View Switcher ── */}
+      <div className="flex-row-between" style={{ marginBottom: 8 }}>
+        <label className="form-label" style={{ margin: 0 }}>
+          <span>Persona Instructions (System Prompt)</span>
+        </label>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            <strong>{words}</strong> words · <strong>{chars}</strong> chars · <Badge color="primary">~{estTokens} tokens</Badge>
+          </span>
+
+          <div
+            style={{
+              display: "flex",
+              background: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: 2,
+            }}
+          >
+            <button
+              type="button"
+              className={`btn btn-xs ${editorTab === "edit" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setEditorTab("edit")}
+              title="Edit Raw Markdown"
+            >
+              <Code size={13} />
+              <span>Edit</span>
+            </button>
+            <button
+              type="button"
+              className={`btn btn-xs ${editorTab === "split" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setEditorTab("split")}
+              title="Side-by-side Live Split"
+            >
+              <Columns size={13} />
+              <span>Split</span>
+            </button>
+            <button
+              type="button"
+              className={`btn btn-xs ${editorTab === "preview" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setEditorTab("preview")}
+              title="Rendered Markdown Preview"
+            >
+              <Eye size={13} />
+              <span>Preview</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Spacious Studio Editor / Preview Canvas ── */}
+      {editorTab === "split" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+          <div>
+            <textarea
+              value={f.text}
+              onChange={(e) => setF({ ...f, text: e.target.value })}
+              placeholder="You are Alex, a 28-year-old friend texting on mobile. Use casual phrasing..."
+              style={{
+                height: 460,
+                width: "100%",
+                fontFamily: '"JetBrains Mono", Consolas, monospace',
+                fontSize: 13,
+                lineHeight: 1.6,
+                padding: "16px 18px",
+                resize: "vertical",
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              height: 460,
+              overflowY: "auto",
+              background: "rgba(0, 0, 0, 0.35)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: "18px 22px",
+            }}
+          >
+            {f.text.trim() ? (
+              <MarkdownView content={f.text} />
+            ) : (
+              <div style={{ color: "var(--text-subtle)", fontStyle: "italic", fontSize: 13 }}>
+                Live rendered preview will appear here as you type...
+              </div>
+            )}
+          </div>
+        </div>
+      ) : editorTab === "preview" ? (
+        <div
+          style={{
+            minHeight: 460,
+            maxHeight: 600,
+            overflowY: "auto",
+            background: "rgba(0, 0, 0, 0.35)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+            padding: "24px 28px",
+            marginBottom: 16,
+          }}
+        >
+          {f.text.trim() ? (
+            <MarkdownView content={f.text} />
+          ) : (
+            <div style={{ color: "var(--text-subtle)", fontStyle: "italic", fontSize: 13 }}>
+              No system prompt text entered yet.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          <textarea
+            value={f.text}
+            onChange={(e) => setF({ ...f, text: e.target.value })}
+            placeholder="You are Alex, a 28-year-old friend texting on mobile. Use casual phrasing..."
+            style={{
+              height: 460,
+              width: "100%",
+              fontFamily: '"JetBrains Mono", Consolas, monospace',
+              fontSize: 13.5,
+              lineHeight: 1.65,
+              padding: "18px 20px",
+              resize: "vertical",
+            }}
+          />
+        </div>
+      )}
 
       <div
         style={{
@@ -198,7 +319,7 @@ function PromptForm({ init, integrations, onSave, onCancel }) {
           lineHeight: 1.5,
         }}
       >
-        💡 <strong>Pro Tip:</strong> Write in the first or second person. Define tone, message length (e.g. 1-2 sentences), slang/vocabulary to use, and topics to avoid.
+        💡 <strong>Pro Tip:</strong> Use Markdown headings (`##`, `###`), bullet points (`-`), and bold tags (`**text**`) to organize persona instructions clearly.
       </div>
 
       <div className="modal-footer-bar" style={{ padding: "20px 0 0", background: "none", borderTop: "1px solid var(--border)", marginTop: 20 }}>
@@ -207,7 +328,7 @@ function PromptForm({ init, integrations, onSave, onCancel }) {
         </button>
         <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
           {saving && <Spinner />}
-          {init?.id ? "Save Persona" : "Create Persona"}
+          {init?.id ? "Save Persona Changes" : "Create Persona"}
         </button>
       </div>
     </>
@@ -219,6 +340,7 @@ export default function SystemPrompts() {
   const [intS] = useResource(() => apiGet("/integrations"), []);
   const [modal, setModal] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
   const [viewMode, setViewMode] = useState("grid"); // grid | table
 
   const integrations = intS.data || [];
@@ -235,6 +357,13 @@ export default function SystemPrompts() {
       toast(e.message, "error");
     }
   }
+
+  const handleCopyText = (text, id) => {
+    copyToClipboard(text);
+    setCopiedId(id);
+    toast("Persona markdown copied to clipboard");
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const columns = [
     {
@@ -255,10 +384,19 @@ export default function SystemPrompts() {
       header: "Persona Preview",
       key: "text",
       render: (r) => (
-        <div style={{ maxWidth: 450, color: "var(--text-main)", fontStyle: "italic", lineHeight: 1.4 }}>
-          "{r.text.slice(0, 100)}{r.text.length > 100 ? "…" : ""}"
+        <div style={{ maxWidth: 520, color: "var(--text-main)", fontStyle: "italic", lineHeight: 1.4 }}>
+          "{r.text.slice(0, 120)}{r.text.length > 120 ? "…" : ""}"
         </div>
       ),
+    },
+    {
+      header: "Estimated Tokens",
+      key: "tokens",
+      width: 140,
+      render: (r) => {
+        const estTokens = Math.ceil(r.text.length / 4);
+        return <Badge color="primary">~{estTokens.toLocaleString()} tokens</Badge>;
+      },
     },
     {
       header: "Actions",
@@ -266,16 +404,24 @@ export default function SystemPrompts() {
       render: (r) => (
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
           <button
+            className="btn btn-ghost btn-xs"
+            onClick={() => handleCopyText(r.text, r.id)}
+            title="Copy Persona Markdown"
+          >
+            {copiedId === r.id ? <Check size={13} color="var(--success)" /> : <Copy size={13} />}
+          </button>
+          <button
             className="btn btn-secondary btn-xs"
             onClick={() => setModal(r)}
-            title="Edit Prompt"
+            title="Edit Persona"
           >
             <Edit2 size={13} />
+            <span>Edit</span>
           </button>
           <button
             className="btn btn-danger btn-xs"
             onClick={() => setDeleteConfirm(r)}
-            title="Delete Prompt"
+            title="Delete Persona"
           >
             <Trash2 size={13} />
           </button>
@@ -291,10 +437,10 @@ export default function SystemPrompts() {
         <div>
           <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Sparkles size={24} color="var(--primary)" />
-            <span>Persona System Prompts</span>
+            <span>System Prompts & Personas Studio</span>
           </h1>
           <p className="card-subtitle">
-            Configure how your AI speaks, behaves, and stays in character across conversations.
+            Configure system prompts, backstory personas, texting habits, and linguistic guidelines across scopes.
           </p>
         </div>
 
@@ -312,7 +458,7 @@ export default function SystemPrompts() {
               className={`btn btn-sm ${viewMode === "grid" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setViewMode("grid")}
               style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
-              title="Card Grid View"
+              title="Spacious Cards View"
             >
               <LayoutGrid size={15} />
             </button>
@@ -320,7 +466,7 @@ export default function SystemPrompts() {
               className={`btn btn-sm ${viewMode === "table" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setViewMode("table")}
               style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
-              title="Data Table View"
+              title="Table View"
             >
               <List size={15} />
             </button>
@@ -351,12 +497,12 @@ export default function SystemPrompts() {
           }
         />
       ) : (
-        /* ── Grid View ── */
+        /* ── Spacious Grid View ── */
         <div>
           {s.loading ? (
-            <div className="grid-2">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: 20 }}>
               {Array.from({ length: 2 }).map((_, i) => (
-                <div key={i} className="glass-card" style={{ height: 200 }}>
+                <div key={i} className="glass-card" style={{ height: 320 }}>
                   <div className="skeleton" style={{ width: "30%", height: 20, marginBottom: 16 }} />
                   <div className="skeleton" style={{ width: "100%", height: 16, marginBottom: 8 }} />
                   <div className="skeleton" style={{ width: "80%", height: 16 }} />
@@ -379,73 +525,98 @@ export default function SystemPrompts() {
               </div>
             </div>
           ) : (
-            <div className="grid-2">
-              {prompts.map((p) => (
-                <div
-                  key={p.id}
-                  className="glass-card glass-card-interactive"
-                  style={{ display: "flex", flexDirection: "column" }}
-                >
-                  <div className="flex-row-between" style={{ marginBottom: 14 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Badge color={scopeColor(p.scope)} lg>
-                        {p.scope}
-                      </Badge>
-                      {p.scope_id && (
-                        <span className="mono" style={{ fontSize: 11, color: "var(--text-subtle)" }}>
-                          ID: {shortId(p.scope_id)}
-                        </span>
-                      )}
-                    </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: 20 }}>
+              {prompts.map((p) => {
+                const words = p.text.trim() ? p.text.trim().split(/\s+/).length : 0;
+                const chars = p.text.length;
+                const estTokens = Math.ceil(chars / 4);
 
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        className="btn btn-secondary btn-xs"
-                        onClick={() => setModal(p)}
-                        title="Edit Persona"
-                      >
-                        <Edit2 size={13} />
-                      </button>
-                      <button
-                        className="btn btn-danger btn-xs"
-                        onClick={() => setDeleteConfirm(p)}
-                        title="Delete Persona"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-
+                return (
                   <div
+                    key={p.id}
+                    className="glass-card glass-card-interactive"
                     style={{
-                      background: "rgba(0,0,0,0.25)",
-                      border: "1px solid var(--border-subtle)",
-                      borderRadius: "var(--radius-md)",
-                      padding: "14px 16px",
-                      fontSize: 13,
-                      lineHeight: 1.6,
-                      color: "var(--text-main)",
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "inherit",
-                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      padding: 24,
+                      marginBottom: 0,
                     }}
                   >
-                    {p.text}
+                    <div className="flex-row-between" style={{ marginBottom: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Badge color={scopeColor(p.scope)} lg>
+                          {p.scope}
+                        </Badge>
+                        {p.scope_id && (
+                          <span className="mono" style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+                            ID: {shortId(p.scope_id)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => handleCopyText(p.text, p.id)}
+                          title="Copy Persona Markdown"
+                        >
+                          {copiedId === p.id ? <Check size={13} color="var(--success)" /> : <Copy size={13} />}
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-xs"
+                          onClick={() => setModal(p)}
+                          title="Edit Persona"
+                        >
+                          <Edit2 size={13} />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          className="btn btn-danger btn-xs"
+                          onClick={() => setDeleteConfirm(p)}
+                          title="Delete Persona"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Spacious Rendered Markdown Body */}
+                    <div
+                      style={{
+                        background: "rgba(0, 0, 0, 0.3)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-md)",
+                        padding: "18px 22px",
+                        flex: 1,
+                        minHeight: 200,
+                        maxHeight: 520,
+                        overflowY: "auto",
+                      }}
+                    >
+                      <MarkdownView content={p.text} />
+                    </div>
+
+                    <div className="flex-row-between" style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--border-subtle)" }}>
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {words} words · {chars} chars
+                      </span>
+                      <Badge color="primary">~{estTokens.toLocaleString()} tokens</Badge>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* ── Create / Edit Modal ── */}
+      {/* ── Create / Edit Full-Width Modal Studio ── */}
       {modal && (
         <Modal
           title={modal.id ? "Edit System Prompt Persona" : "Create System Prompt Persona"}
-          subtitle="Define how GhostReply talks, behaves, and reasons"
+          subtitle="Define how GhostReply talks, behaves, and reasons with live Markdown preview"
           onClose={() => setModal(null)}
-          wide
+          fullWidth
         >
           <PromptForm
             init={modal}

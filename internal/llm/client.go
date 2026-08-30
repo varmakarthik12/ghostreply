@@ -3,9 +3,11 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -357,6 +359,82 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		return "", stats, fmt.Errorf("incomplete response: finish_reason=%q (expected \"stop\", \"end_turn\", or \"length\")", finishReason)
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), stats, nil
+}
+
+// TranscribeAudio sends audio bytes to an OpenAI-compatible /v1/audio/transcriptions endpoint.
+func (c *Client) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, Stats, error) {
+	if format == "" {
+		format = "mp3"
+	}
+	rawBytes, err := base64.StdEncoding.DecodeString(audioBase64)
+	if err != nil {
+		return "", Stats{}, fmt.Errorf("decode audio base64: %w", err)
+	}
+
+	url := c.BaseURL
+	if !strings.Contains(url, "/audio/transcriptions") {
+		if !strings.Contains(url, "/v1") {
+			url += "/v1"
+		}
+		url += "/audio/transcriptions"
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	filename := fmt.Sprintf("audio.%s", format)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return "", Stats{}, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(rawBytes); err != nil {
+		return "", Stats{}, fmt.Errorf("write audio bytes: %w", err)
+	}
+
+	if model == "" {
+		model = "whisper-1"
+	}
+	if err := writer.WriteField("model", model); err != nil {
+		return "", Stats{}, fmt.Errorf("write model field: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return "", Stats{}, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, &body)
+	if err != nil {
+		return "", Stats{}, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+
+	start := time.Now()
+	resp, err := c.HTTP.Do(req)
+	duration := time.Since(start).Milliseconds()
+	if err != nil {
+		return "", Stats{DurationMs: duration}, err
+	}
+	defer resp.Body.Close()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return "", Stats{DurationMs: duration}, fmt.Errorf("whisper %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(respBytes, &out); err != nil {
+		return "", Stats{DurationMs: duration}, fmt.Errorf("decode transcription response: %w (body=%s)", err, string(respBytes))
+	}
+
+	stats := Stats{
+		DurationMs: duration,
+	}
+	return strings.TrimSpace(out.Text), stats, nil
 }
 
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {

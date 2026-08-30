@@ -71,6 +71,10 @@ func (m *summaryRecordingLLM) Chat(ctx context.Context, model string, msgs []llm
 	return "### 1. User Profile & Disclosed Facts\n- Age: 24, Location: Seattle\n### 2. Host Persona & Disclosed Facts\n- Location: New York", llm.Stats{}, nil
 }
 
+func (m *summaryRecordingLLM) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, llm.Stats, error) {
+	return "mock voice transcription", llm.Stats{}, nil
+}
+
 func (m *summaryRecordingLLM) ListModels(ctx context.Context) ([]string, error) {
 	return []string{"llama3.2"}, nil
 }

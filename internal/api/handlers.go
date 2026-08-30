@@ -12,6 +12,12 @@ import (
 	"github.com/varmakarthik12/ghostreply/internal/summary"
 )
 
+var (
+	Version   = "v1.0.0"
+	Commit    = "none"
+	BuildDate = "unknown"
+)
+
 type API struct {
 	Store  *db.Store
 	Engine *chat.Engine
@@ -38,8 +44,13 @@ func (a *API) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func (a *API) Mount(r chi.Router) {
+	// Public version endpoint
+	r.Get("/version", a.versionHandler)
+
 	r.Group(func(r chi.Router) {
 		r.Use(a.AuthMiddleware)
+
+		r.Get("/version", a.versionHandler)
 
 		r.Post("/integrations/{integrationID}/conversations/{externalID}/auto-reply", a.autoReply)
 
@@ -517,4 +528,12 @@ func (a *API) listOllamaModels(w http.ResponseWriter, r *http.Request) {
 		models = []string{}
 	}
 	writeJSON(w, http.StatusOK, models)
+}
+
+func (a *API) versionHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version":    Version,
+		"commit":     Commit,
+		"build_date": BuildDate,
+	})
 }

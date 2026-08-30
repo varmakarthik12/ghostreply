@@ -17,6 +17,7 @@ import {
   X,
   Ghost,
 } from "lucide-react";
+import { useAppVersion } from "../lib/version";
 
 const NAV_SECTIONS = [
   {
@@ -62,6 +63,8 @@ export default function Sidebar({
   collapsed = false,
   onToggleCollapse,
 }) {
+  const version = useAppVersion();
+
   return (
     <aside className={`app-sidebar${isOpen ? " open" : ""}${collapsed ? " collapsed" : ""}`}>
       {/* ── Brand / Header ── */}
@@ -86,7 +89,7 @@ export default function Sidebar({
           {!collapsed && (
             <>
               <span>GhostReply</span>
-              <span className="brand-badge">v1.0</span>
+              <span className="brand-badge">{version}</span>
             </>
           )}
         </div>

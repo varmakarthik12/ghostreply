@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   FileText,
   Sparkles,
@@ -11,20 +11,28 @@ import {
   Check,
   LayoutGrid,
   List,
+  Search,
+  ChevronDown,
+  X,
 } from "lucide-react";
 import Badge from "../components/Badge";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Spinner from "../components/Spinner";
+import MarkdownView from "../components/MarkdownView";
 import { useResource } from "../lib/hooks";
 import { apiGet, apiPost, apiDel } from "../lib/api";
 import { toast } from "../lib/toast";
-import { fmtDate, fmtRelative, shortId, copyToClipboard } from "../lib/utils";
+import { fmtDate, fmtRelative, shortId, platformColor, copyToClipboard } from "../lib/utils";
 
 export default function Summaries() {
   const [convS] = useResource(() => apiGet("/conversations"), []);
   const [convId, setConvId] = useState("");
+  const [convSearch, setConvSearch] = useState("");
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
   const [triggering, setTriggering] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [detailsModal, setDetailsModal] = useState(null);
@@ -38,7 +46,44 @@ export default function Summaries() {
 
   const convs = convS.data || [];
   const convMap = Object.fromEntries(convs.map((c) => [c.id, c]));
+  const activeConv = convs.find((c) => c.id === convId);
   const summaries = s.data || [];
+
+  // Close combobox on outside click
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Filter conversations for the searchable typeahead combobox
+  const filteredConversations = useMemo(() => {
+    if (!convSearch.trim()) return convs;
+    const q = convSearch.toLowerCase();
+    return convs.filter((c) => {
+      return (
+        c.title?.toLowerCase().includes(q) ||
+        c.external_id?.toLowerCase().includes(q) ||
+        c.platform?.toLowerCase().includes(q)
+      );
+    });
+  }, [convs, convSearch]);
+
+  const handleSelectConversation = (c) => {
+    if (c) {
+      setConvId(c.id);
+      setConvSearch("");
+    } else {
+      setConvId("");
+      setConvSearch("");
+    }
+    setIsDropdownOpen(false);
+    setSelectedIds([]);
+  };
 
   async function handleTrigger() {
     if (!convId) return;
@@ -204,33 +249,198 @@ export default function Summaries() {
         </div>
       </div>
 
-      {/* ── Filter & Trigger Toolbar ── */}
-      <div className="glass-card" style={{ padding: "14px 18px", marginBottom: 0 }}>
-        <div className="flex-row-between">
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
-            <Filter size={15} color="var(--text-subtle)" />
-            <select
-              value={convId}
-              onChange={(e) => {
-                setConvId(e.target.value);
-                setSelectedIds([]);
-              }}
-              style={{ maxWidth: 320, height: 38, fontSize: 13 }}
-            >
-              <option value="">All Conversations</option>
-              {convs.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title || c.external_id}
-                </option>
-              ))}
-            </select>
+      {/* ── Searchable Typeahead Conversation Picker Bar ── */}
+      <div
+        className="glass-card"
+        style={{
+          padding: "14px 18px",
+          marginBottom: 0,
+          position: "relative",
+          zIndex: 500,
+          overflow: "visible",
+        }}
+      >
+        <div className="flex-row-between" style={{ gap: 16, flexWrap: "wrap", overflow: "visible" }}>
+          {/* Combobox container */}
+          <div ref={dropdownRef} style={{ position: "relative", flex: 1, minWidth: 280, maxWidth: 480, overflow: "visible" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-main)", whiteSpace: "nowrap" }}>
+                Filter Conversation:
+              </span>
+
+              <div
+                style={{
+                  position: "relative",
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                <Search
+                  size={15}
+                  style={{
+                    position: "absolute",
+                    left: 10,
+                    color: "var(--text-muted)",
+                    pointerEvents: "none",
+                  }}
+                />
+                <input
+                  type="text"
+                  value={isDropdownOpen ? convSearch : activeConv ? `${activeConv.title || activeConv.external_id} (${activeConv.external_id})` : ""}
+                  placeholder={convS.loading ? "Loading conversations…" : "All Conversations (Type to search…)"}
+                  onFocus={() => {
+                    setIsDropdownOpen(true);
+                    setConvSearch("");
+                  }}
+                  onChange={(e) => {
+                    setConvSearch(e.target.value);
+                    setIsDropdownOpen(true);
+                  }}
+                  style={{
+                    paddingLeft: 34,
+                    paddingRight: 32,
+                    height: 38,
+                    fontSize: 13,
+                    width: "100%",
+                  }}
+                />
+                {convId ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConvId("");
+                      setConvSearch("");
+                      setIsDropdownOpen(false);
+                    }}
+                    style={{
+                      position: "absolute",
+                      right: 8,
+                      background: "none",
+                      border: "none",
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      padding: 4,
+                      display: "flex",
+                    }}
+                    title="Show all conversations"
+                  >
+                    <X size={14} />
+                  </button>
+                ) : (
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      color: "var(--text-muted)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Typeahead Dropdown Menu */}
+            {isDropdownOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  left: 0,
+                  right: 0,
+                  maxHeight: 300,
+                  overflowY: "auto",
+                  background: "#0f172a",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  borderRadius: "var(--radius-md)",
+                  boxShadow: "0 20px 40px -5px rgba(0, 0, 0, 0.75)",
+                  backdropFilter: "blur(20px)",
+                  zIndex: 9999,
+                }}
+              >
+                {/* All Conversations Option */}
+                <div
+                  onClick={() => handleSelectConversation(null)}
+                  style={{
+                    padding: "10px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    cursor: "pointer",
+                    background: !convId ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    color: "var(--text-main)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (convId) e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (convId) e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <span>All Conversations</span>
+                  {!convId && <Check size={16} color="var(--primary)" />}
+                </div>
+
+                {filteredConversations.length === 0 ? (
+                  <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                    No conversations matching "{convSearch}"
+                  </div>
+                ) : (
+                  filteredConversations.map((c) => {
+                    const isSelected = c.id === convId;
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => handleSelectConversation(c)}
+                        style={{
+                          padding: "10px 14px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          cursor: "pointer",
+                          background: isSelected ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                          borderBottom: "1px solid var(--border-subtle)",
+                          transition: "background 0.15s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                            <strong style={{ fontSize: 13, color: "var(--text-main)" }}>
+                              {c.title || "Untitled Conversation"}
+                            </strong>
+                            {c.platform && (
+                              <Badge color={platformColor(c.platform)}>{c.platform}</Badge>
+                            )}
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                            ID: {c.external_id}
+                          </div>
+                        </div>
+
+                        {isSelected && <Check size={16} color="var(--primary)" />}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
           <button
             className="btn btn-primary btn-sm"
             onClick={handleTrigger}
             disabled={!convId || triggering}
-            title={!convId ? "Select a conversation first" : "Run background memory summarizer"}
+            title={!convId ? "Select a conversation first to trigger summarization" : "Run background memory summarizer"}
           >
             {triggering ? <Spinner /> : <Sparkles size={14} />}
             <span>Trigger Memory Consolidation</span>
@@ -251,7 +461,11 @@ export default function Summaries() {
           searchPlaceholder="Search memory summaries by keyword…"
           searchKeys={["text", "conversation_id"]}
           emptyTitle="No background memory summaries"
-          emptyDescription="Summaries are generated automatically when message thresholds are reached or triggered manually."
+          emptyDescription={
+            convId
+              ? "No memory summaries recorded for this conversation yet. Click 'Trigger Memory Consolidation' above."
+              : "Summaries are generated automatically when message thresholds are reached or triggered manually."
+          }
         />
       ) : (
         /* ── Timeline View ── */
@@ -274,7 +488,9 @@ export default function Summaries() {
                 </div>
                 <div className="empty-state-title">No memory summaries recorded</div>
                 <div className="empty-state-desc">
-                  Select a conversation and click "Trigger Memory Consolidation" to generate the first long-term memory summary.
+                  {convId
+                    ? "Click 'Trigger Memory Consolidation' above to generate the first long-term memory summary for this conversation."
+                    : "Select a conversation above and click 'Trigger Memory Consolidation' to generate a long-term memory summary."}
                 </div>
               </div>
             </div>
@@ -342,13 +558,9 @@ export default function Summaries() {
                         border: "1px solid var(--border-subtle)",
                         borderRadius: "var(--radius-md)",
                         padding: "14px 16px",
-                        fontSize: 13,
-                        lineHeight: 1.6,
-                        color: "var(--text-main)",
-                        whiteSpace: "pre-wrap",
                       }}
                     >
-                      {item.text}
+                      <MarkdownView content={item.text} />
                     </div>
                   </div>
                 );
@@ -395,16 +607,11 @@ export default function Summaries() {
                 border: "1px solid var(--border)",
                 borderRadius: "var(--radius-md)",
                 padding: 20,
-                fontSize: 14,
-                lineHeight: 1.7,
-                color: "var(--text-main)",
-                whiteSpace: "pre-wrap",
                 maxHeight: "60vh",
                 overflowY: "auto",
-                fontFamily: "inherit",
               }}
             >
-              {detailsModal.text}
+              <MarkdownView content={detailsModal.text} />
             </div>
 
             <div className="modal-footer-bar" style={{ padding: "16px 0 0", background: "none", borderTop: "1px solid var(--border)" }}>

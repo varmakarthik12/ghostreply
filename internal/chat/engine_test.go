@@ -18,6 +18,10 @@ func (m *mockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, co
 	return "mock reply", llm.Stats{}, nil
 }
 
+func (m *mockLLM) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, llm.Stats, error) {
+	return "mock voice transcription", llm.Stats{}, nil
+}
+
 func (m *mockLLM) ListModels(ctx context.Context) ([]string, error) {
 	return []string{"llama3.2"}, nil
 }
@@ -188,6 +192,11 @@ func (m *multiModalMockLLM) Chat(ctx context.Context, model string, msgs []llm.M
 	}
 	m.calls = append(m.calls, msgs...)
 	return "mock reply to snap", llm.Stats{}, nil
+}
+
+func (m *multiModalMockLLM) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, llm.Stats, error) {
+	m.modelsUsed = append(m.modelsUsed, model)
+	return "Mock voice transcription: hello this is a voice note", llm.Stats{}, nil
 }
 
 func (m *multiModalMockLLM) ListModels(ctx context.Context) ([]string, error) {
@@ -409,6 +418,10 @@ func (m *recordingMockLLM) Chat(ctx context.Context, model string, msgs []llm.Me
 		}
 	}
 	return "test reply", llm.Stats{}, nil
+}
+
+func (m *recordingMockLLM) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, llm.Stats, error) {
+	return "mock voice transcription", llm.Stats{}, nil
 }
 
 func (m *recordingMockLLM) ListModels(ctx context.Context) ([]string, error) {

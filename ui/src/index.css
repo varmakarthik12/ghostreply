@@ -1220,8 +1220,106 @@ tbody tr:last-child td, .modern-table tbody tr:last-child td {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 0;
+  gap: 12px;
+}
+
+/* ── Command Palette (⌘K) ── */
+.command-palette-modal {
+  max-width: 620px;
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 40px -10px var(--primary-glow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.command-search-input {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.command-search-input input {
+  flex: 1;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 15px;
+  color: var(--text-main);
+  padding: 0;
+  height: auto;
+  outline: none;
+}
+
+.command-search-input input::placeholder {
+  color: var(--text-muted);
+}
+
+.command-list {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-main);
+  font-size: 13.5px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  user-select: none;
+}
+
+.command-item:hover,
+.command-item.selected {
+  background: rgba(99, 102, 241, 0.15);
+  color: #ffffff;
+}
+
+.command-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.command-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.command-item.selected .command-icon {
+  background: rgba(99, 102, 241, 0.25);
+  color: var(--primary);
+}
+
+.command-footer {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-muted);
 }
 
 @keyframes fadeIn {
@@ -1577,5 +1675,90 @@ tbody tr:last-child td, .modern-table tbody tr:last-child td {
   .responsive-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Rendered Markdown Typography ── */
+.markdown-rendered-body {
+  color: var(--text-main);
+  line-height: 1.65;
+  font-size: 13.5px;
+}
+
+.markdown-rendered-body h1,
+.markdown-rendered-body h2,
+.markdown-rendered-body h3,
+.markdown-rendered-body h4 {
+  color: #f8fafc;
+  margin-top: 14px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-rendered-body h1 { font-size: 17px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.markdown-rendered-body h2 { font-size: 15px; }
+.markdown-rendered-body h3 { font-size: 14px; color: var(--primary); }
+.markdown-rendered-body h4 { font-size: 13px; color: var(--accent); }
+
+.markdown-rendered-body p {
+  margin-bottom: 10px;
+}
+.markdown-rendered-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-rendered-body ul,
+.markdown-rendered-body ol {
+  margin: 8px 0 12px 20px;
+  padding: 0;
+}
+
+.markdown-rendered-body li {
+  margin-bottom: 4px;
+}
+
+.markdown-rendered-body strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.markdown-rendered-body em {
+  color: #cbd5e1;
+  font-style: italic;
+}
+
+.markdown-rendered-body blockquote {
+  border-left: 3px solid var(--primary);
+  background: rgba(99, 102, 241, 0.06);
+  padding: 8px 14px;
+  margin: 10px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-body);
+}
+
+.markdown-rendered-body pre {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 10px 0;
+  font-size: 12px;
+  color: #a5f3fc;
+}
+
+.markdown-rendered-body code {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #e0e7ff;
+}
+
+.markdown-rendered-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
 }
 

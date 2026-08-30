@@ -4,8 +4,10 @@ import Alert from "../components/Alert";
 import Field from "../components/Field";
 import Spinner from "../components/Spinner";
 import { setToken } from "../lib/api";
+import { useAppVersion } from "../lib/version";
 
 export default function SetupScreen({ onConnect }) {
+  const version = useAppVersion();
   const [token, setTokenInput] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [err, setErr] = useState("");
@@ -57,8 +59,9 @@ export default function SetupScreen({ onConnect }) {
           <Ghost size={36} />
         </div>
 
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--text-main)", marginBottom: 6 }}>
-          GhostReply Console
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--text-main)", marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <span>GhostReply Console</span>
+          <span className="brand-badge" style={{ fontSize: 11 }}>{version}</span>
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 24, lineHeight: 1.5 }}>
           Autonomous AI messaging agent with infinite cross-platform memory. Enter your authentication token to access the operations dashboard.

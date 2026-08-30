@@ -23,6 +23,10 @@ func (s *stubLLM) Chat(_ context.Context, _ string, _ []llm.Message, _ int, _ ll
 	return s.Reply, llm.Stats{}, nil
 }
 
+func (s *stubLLM) TranscribeAudio(_ context.Context, _ string, _ string, _ string) (string, llm.Stats, error) {
+	return s.Reply, llm.Stats{}, nil
+}
+
 func (s *stubLLM) ListModels(_ context.Context) ([]string, error) {
 	return []string{"llama3.2"}, nil
 }

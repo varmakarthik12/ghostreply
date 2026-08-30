@@ -17,6 +17,7 @@ import {
   LogOut,
   X,
 } from "lucide-react";
+import { useAppVersion } from "../lib/version";
 
 export default function CommandPalette({
   isOpen,
@@ -24,6 +25,7 @@ export default function CommandPalette({
   onNavigate,
   onLogout,
 }) {
+  const version = useAppVersion();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef(null);
@@ -144,13 +146,13 @@ export default function CommandPalette({
                   onClick={() => execute(item)}
                   onMouseEnter={() => setSelectedIndex(idx)}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div className="command-icon" style={{ display: "flex", color: isSelected ? "var(--primary)" : "var(--text-muted)" }}>
+                  <div className="command-item-left">
+                    <div className="command-icon">
                       <Icon size={16} />
                     </div>
-                    <span>{item.label}</span>
+                    <span style={{ fontWeight: isSelected ? 600 : 400 }}>{item.label}</span>
                   </div>
-                  <span style={{ fontSize: 11, color: "var(--text-subtle)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  <span style={{ fontSize: 11, color: isSelected ? "var(--text-main)" : "var(--text-subtle)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                     {item.category}
                   </span>
                 </div>
@@ -159,24 +161,13 @@ export default function CommandPalette({
           )}
         </div>
 
-        <div
-          style={{
-            padding: "10px 16px",
-            borderTop: "1px solid var(--border)",
-            background: "rgba(0,0,0,0.2)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontSize: 11,
-            color: "var(--text-muted)",
-          }}
-        >
+        <div className="command-footer">
           <div style={{ display: "flex", gap: 12 }}>
             <span><kbd>↑</kbd> <kbd>↓</kbd> Navigate</span>
             <span><kbd>↵</kbd> Select</span>
             <span><kbd>ESC</kbd> Close</span>
           </div>
-          <span>GhostReply v1.0</span>
+          <span>GhostReply {version}</span>
         </div>
       </div>
     </div>

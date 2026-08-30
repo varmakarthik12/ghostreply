@@ -25,6 +25,7 @@ type LLMClientFactory func(baseURL, apiKey string, timeout time.Duration) LLM
 
 type LLM interface {
 	Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int, params llm.SamplingParams) (string, llm.Stats, error)
+	TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, llm.Stats, error)
 	ListModels(ctx context.Context) ([]string, error)
 }
 
@@ -221,31 +222,43 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				format = "aac"
 			} else if strings.Contains(req.MediaType, "ogg") || strings.Contains(req.MediaType, "opus") {
 				format = "opus"
+			} else if strings.Contains(req.MediaType, "m4a") {
+				format = "m4a"
 			}
 
-			analysisPrompt := "Identify what is spoken in this audio/voice note. Summarize the key message, details, and tone in 1-2 brief, descriptive sentences. Respond ONLY with the final summary."
-
-			analysisMsgs := []llm.Message{
-				{
-					Role:    "user",
-					Content: analysisPrompt,
-					Audios: []llm.AudioContent{
-						{
-							Data:   req.MediaData,
-							Format: format,
+			// 1. First try dedicated audio transcription (e.g. Whisper endpoint /v1/audio/transcriptions)
+			transcript, _, err := voiceClient.TranscribeAudio(ctx, voiceModel, req.MediaData, format)
+			if err == nil && transcript != "" {
+				mediaDescription = "Voice Note: " + strings.TrimSpace(transcript)
+				if debugEnabled {
+					log.Printf("[DEBUG] Generated voice transcription via audio API: %s", mediaDescription)
+				}
+			} else {
+				// 2. If transcription endpoint fails or returns error, try multimodal Chat endpoint (for direct audio chat models)
+				analysisPrompt := "Identify what is spoken in this audio/voice note. Summarize the key message, details, and tone in 1-2 brief, descriptive sentences. Respond ONLY with the final summary."
+				analysisMsgs := []llm.Message{
+					{
+						Role:    "user",
+						Content: analysisPrompt,
+						Audios: []llm.AudioContent{
+							{
+								Data:   req.MediaData,
+								Format: format,
+							},
 						},
 					},
-				},
-			}
+				}
 
-			reply, _, err := voiceClient.Chat(ctx, voiceModel, analysisMsgs, voiceCtxSize, voiceParams)
-			if err != nil {
-				log.Printf("[ERROR] Voice note analysis failed: %v", err)
-				mediaDescription = "Voice Note: (analysis failed)"
-			} else {
-				mediaDescription = "Voice Note: " + strings.TrimSpace(reply)
-				if debugEnabled {
-					log.Printf("[DEBUG] Generated voice transcription/summary: %s", mediaDescription)
+				reply, _, chatErr := voiceClient.Chat(ctx, voiceModel, analysisMsgs, voiceCtxSize, voiceParams)
+				if chatErr == nil && reply != "" {
+					mediaDescription = "Voice Note: " + strings.TrimSpace(reply)
+					if debugEnabled {
+						log.Printf("[DEBUG] Generated voice transcription/summary via Chat API: %s", mediaDescription)
+					}
+				} else {
+					log.Printf("[WARN] Voice note audio analysis unavailable on model %s (transcribe err: %v, chat err: %v)", voiceModel, err, chatErr)
+					// Graceful fallback description so persona stays in character and does not receive a broken analysis failure
+					mediaDescription = "Voice Note: [Voice message received]"
 				}
 			}
 		} else if isVideo {
