@@ -151,19 +151,32 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 	}
 
 	prompt := `
-You are a conversation memory assistant. Read the previous summary (if any) and the recent conversation, then produce a concise updated summary.
+You are a conversation memory assistant. Read the previous summary (if any) and the recent conversation, then produce a comprehensive, structured memory summary.
 
-Capture these key details (only what is known — skip unknowns):
-1. User: name, age, location, job/school, hobbies, preferences, family/friends/pets.
-2. Relationship: stage (strangers/friends/flirting/etc.), tone, inside jokes, recurring topics.
-3. Host facts: everything the HOST has shared about themselves — never contradict these.
-4. Recent context: last topics discussed, open questions, current mood.
+Organize the summary into these clear sections:
 
-Rules:
-- Keep the summary concise and skimmable — 2,000 to 2,500 words max.
-- Preserve all facts from the previous summary; never drop or contradict them.
-- Use specific details, not vague phrases like "they had a nice chat".
-- Never invent facts.
+### 1. User Profile & Disclosed Facts
+- Core Identity: Name, age/birthdate, location/hometown/timezone, occupation/school/field of study.
+- Personal Background: Family, friends, pets, relationship status, living situation.
+- Lifestyle & Preferences: Hobbies, daily routine, favorite things, dislikes, quirks.
+- Specific Details: Any personal stories, plans, secrets, or specific facts the user has ever shared.
+
+### 2. Host Persona & Disclosed Facts
+- Everything the HOST has claimed or shared about themselves (age, location, job, routine, opinions). The host must NEVER contradict these facts in future chats.
+
+### 3. Relationship Dynamic & Tone
+- Stage of relationship (e.g. strangers, friends, close friends, flirting, banter).
+- Established tone, nicknames, inside jokes, topics they bond over, boundaries.
+
+### 4. Recent Context & Ongoing Threads
+- Latest topics discussed in the most recent messages.
+- Active storylines, open questions, plans mentioned, current mood/vibe.
+
+CRITICAL RULES:
+- PERMANENT MEMORY: NEVER drop, forget, or contradict facts from the Previous Summary (especially User age, location, occupation, family, background, preferences, and Host facts). Always carry them forward and append/update with any new information.
+- Use concrete details and exact names/places/facts rather than vague generalizations.
+- If a detail is unknown, simply omit it — never guess or invent facts.
+- Keep the overall summary clean, structured, and easy for an AI to parse (2,000 to 2,500 words max).
 	`
 
 	if prevContext != "" {
@@ -179,7 +192,7 @@ Rules:
 	_ = w.Store.UpdateActivityLog(logID, "in_progress", "Generating summary with "+summaryModel, "")
 
 	reply, stats, err := summaryClient.Chat(ctx, summaryModel, []llm.Message{
-		{Role: "system", Content: "You are a conversation memory writer. Your output is injected into a chat AI system prompt. Write a concise, structured summary — 2,000 to 2,500 words maximum. Capture only the most important facts: user identity, relationship stage, host details, and recent context. Prioritize specifics over completeness. Never pad or repeat. Never invent facts."},
+		{Role: "system", Content: "You are a meticulous conversation memory archivist. Your output is injected directly into a chat AI system prompt. Produce a structured, durable memory document with distinct sections for User Profile, Host Persona Facts, Relationship Dynamic, and Recent Threads. Always preserve all known personal facts (age, location, background, preferences) so the AI never forgets them across conversations. Never invent facts."},
 		{Role: "user", Content: prompt},
 	}, summaryCtxSize, summaryParams)
 	if err != nil {

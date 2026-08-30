@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/varmakarthik12/ghostreply/internal/db"
 	"github.com/varmakarthik12/ghostreply/internal/llm"
+	"github.com/varmakarthik12/ghostreply/internal/timeutil"
 )
 
 const DefaultModel = "llama3.2"
@@ -367,6 +368,8 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	_ = e.Store.UpdateActivityLog(logID, "in_progress", "Generating reply...", "")
 
 	style := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "reply_style", "brief")
+	timezone := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "timezone", "UTC")
+	userLocation := e.Store.ResolveConfig(conv.ID, req.IntegrationID, "user_location", "")
 
 	system := persona
 	if system != "" {
@@ -376,6 +379,14 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	if conv.ChatType != "" {
 		system += fmt.Sprintf("You are in a %s chat. Stay fully in character — never break the persona.", conv.ChatType) + "\n"
 	}
+
+	timeCtx := timeutil.BuildTimeContext(time.Now().UTC(), userLocation, timezone)
+	system += timeCtx + "\n"
+	system += "## Contextual & Temporal Guidelines" + "\n"
+	system += "- Be temporally and situationally aware. Your current activities, greetings, and tone should realistically match the current time of day and location." + "\n"
+	system += "- When asked 'what are you doing?' or 'what are you up to?', reply with activities that make sense for this exact time of day (e.g. at 3am: scrolling phone in bed, can't sleep, winding down, late night studying/gaming; in the afternoon: working, running errands, hanging out; in the evening: dinner, relaxing)." + "\n"
+	system += "- When asked for the time (e.g. 'what time is it?', 'what time is it over there?'), reply casually and naturally like a normal human texting a friend — rounded or natural (e.g. 'around 3am', '3:15', 'almost 4 in the morning', 'evening 4ish', 'quarter past 5'). Never reply with robotic ISO timestamps, machine-like time strings, or seconds." + "\n"
+	system += "- Never mention or volunteer the time unprompted. Only state the time when explicitly asked or when naturally relevant to the flow of conversation." + "\n\n"
 
 	if summaryText != "" {
 		system += "## Background memory" + "\n"

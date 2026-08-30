@@ -345,3 +345,79 @@ func TestMultiModalAutoReply(t *testing.T) {
 		t.Errorf("expected voice note media description, got %s", voiceMsg.MediaDescription)
 	}
 }
+
+type recordingMockLLM struct {
+	lastSystemPrompt string
+}
+
+func (m *recordingMockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int, params llm.SamplingParams) (string, llm.Stats, error) {
+	for _, msg := range msgs {
+		if msg.Role == "system" {
+			m.lastSystemPrompt = msg.Content
+		}
+	}
+	return "test reply", llm.Stats{}, nil
+}
+
+func (m *recordingMockLLM) ListModels(ctx context.Context) ([]string, error) {
+	return []string{"llama3.2"}, nil
+}
+
+func TestTemporalContextInSystemPrompt(t *testing.T) {
+	dbPath := "test_temporal.db"
+	os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	store, err := db.NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	// Set timezone and user_location
+	_ = store.UpsertConfig(&db.Config{
+		Scope: "global",
+		Key:   "timezone",
+		Value: "America/New_York",
+	})
+	_ = store.UpsertConfig(&db.Config{
+		Scope: "global",
+		Key:   "user_location",
+		Value: "New York, USA",
+	})
+
+	mockLLM := &recordingMockLLM{}
+	factory := func(baseURL, apiKey string, timeout time.Duration) LLM { return mockLLM }
+	engine := NewEngine(store, "http://localhost:11434", factory)
+
+	ctx := context.Background()
+	req := AutoReplyRequest{
+		IntegrationID:  "int_temp",
+		ConversationID: "conv_temp",
+		Content:        "what are you doing right now?",
+		SenderID:       "user_temp",
+		SenderName:     "Sam",
+		Timestamp:      "2026-08-30T10:00:00Z",
+		MessageID:      "msg_temp_1",
+	}
+
+	_, err = engine.HandleAutoReply(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sysPrompt := mockLLM.lastSystemPrompt
+	if !strings.Contains(sysPrompt, "Real-time temporal and location context") {
+		t.Errorf("expected temporal context in system prompt, got:\n%s", sysPrompt)
+	}
+	if !strings.Contains(sysPrompt, "New York, USA") {
+		t.Errorf("expected location in system prompt, got:\n%s", sysPrompt)
+	}
+	if !strings.Contains(sysPrompt, "Contextual & Temporal Guidelines") {
+		t.Errorf("expected contextual guidelines in system prompt, got:\n%s", sysPrompt)
+	}
+	if !strings.Contains(sysPrompt, "When asked for the time") {
+		t.Errorf("expected natural time answering instruction in system prompt, got:\n%s", sysPrompt)
+	}
+}
+

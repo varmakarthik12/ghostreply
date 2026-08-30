@@ -149,6 +149,8 @@ func (s *Store) Seed() error {
 		"max_consecutive_assistant_messages": "2",
 		"debug_auto_reply":                   "false",
 		"summary_model":                      "",
+		"timezone":                           "UTC",
+		"user_location":                      "",
 	}
 
 	for k, v := range defaults {

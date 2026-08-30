@@ -54,10 +54,16 @@ const CONFIG_KEYS = [
     desc: "Skip auto-reply if message is older than this (0 to disable)",
   },
   {
+    key: "user_location",
+    default: "",
+    group: "other",
+    desc: "User/Host location (e.g. New York, USA; London, UK; Tokyo)",
+  },
+  {
     key: "timezone",
     default: "UTC",
     group: "other",
-    desc: "Target timezone (e.g. America/New_York, Asia/Kolkata)",
+    desc: "Target timezone (e.g. America/New_York, Asia/Kolkata, Local)",
   },
   {
     key: "activity_log_keep_days",
