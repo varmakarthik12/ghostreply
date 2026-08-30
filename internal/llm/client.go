@@ -18,6 +18,7 @@ type Message struct {
 	Content string         `json:"content"`
 	Images  []string       `json:"images,omitempty"`
 	Audios  []AudioContent `json:"audios,omitempty"`
+	Videos  []string       `json:"videos,omitempty"`
 }
 
 type AudioContent struct {
@@ -197,6 +198,9 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 	type openAIImageURL struct {
 		URL string `json:"url"`
 	}
+	type openAIVideoURL struct {
+		URL string `json:"url"`
+	}
 	type openAIAudio struct {
 		Data   string `json:"data"`
 		Format string `json:"format"`
@@ -205,6 +209,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		Type       string          `json:"type"`
 		Text       string          `json:"text,omitempty"`
 		ImageURL   *openAIImageURL `json:"image_url,omitempty"`
+		VideoURL   *openAIVideoURL `json:"video_url,omitempty"`
 		InputAudio *openAIAudio    `json:"input_audio,omitempty"`
 	}
 	type openAIMessage struct {
@@ -214,7 +219,7 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 
 	var openAIMsgs []openAIMessage
 	for _, m := range msgs {
-		if len(m.Images) > 0 || len(m.Audios) > 0 {
+		if len(m.Images) > 0 || len(m.Audios) > 0 || len(m.Videos) > 0 {
 			parts := []openAIMessagePart{}
 			if m.Content != "" {
 				parts = append(parts, openAIMessagePart{
@@ -231,6 +236,18 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 					Type: "image_url",
 					ImageURL: &openAIImageURL{
 						URL: prefix + img,
+					},
+				})
+			}
+			for _, vid := range m.Videos {
+				prefix := ""
+				if !strings.HasPrefix(vid, "data:") {
+					prefix = "data:video/mp4;base64,"
+				}
+				parts = append(parts, openAIMessagePart{
+					Type: "video_url",
+					VideoURL: &openAIVideoURL{
+						URL: prefix + vid,
 					},
 				})
 			}

@@ -70,12 +70,13 @@ const parseValue = (val) => {
   try {
     const parsed = JSON.parse(val);
     if (parsed && typeof parsed === "object") {
-      if (parsed.chat || parsed.summary || parsed.image || parsed.voice) {
+      if (parsed.chat || parsed.summary || parsed.image || parsed.voice || parsed.video) {
         return {
           chat:    parseModelSetting(parsed.chat),
           summary: parseModelSetting(parsed.summary),
           image:   parseModelSetting(parsed.image),
           voice:   parseModelSetting(parsed.voice),
+          video:   parseModelSetting(parsed.video),
           request_delay:   parsed.request_delay   || 0,
           request_timeout: parsed.request_timeout || 0,
         };
@@ -86,6 +87,7 @@ const parseValue = (val) => {
           summary: parseModelSetting({ model: parsed.summary_model || "" }),
           image:   parseModelSetting({ model: parsed.image_model || parsed.vision_model || "" }),
           voice:   parseModelSetting({ model: parsed.voice_model || "" }),
+          video:   parseModelSetting({ model: parsed.video_model || "" }),
           request_delay:   parsed.request_delay   || 0,
           request_timeout: parsed.request_timeout || 0,
         };
@@ -97,6 +99,7 @@ const parseValue = (val) => {
     summary: parseModelSetting(null),
     image:   parseModelSetting(null),
     voice:   parseModelSetting(null),
+    video:   parseModelSetting(null),
     request_delay:   0,
     request_timeout: 0,
   };
@@ -242,6 +245,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
     summary: initialValues.summary,
     image:   initialValues.image,
     voice:   initialValues.voice,
+    video:   initialValues.video,
     request_delay:   initialValues.request_delay,
     request_timeout: initialValues.request_timeout,
     ...init,
@@ -274,6 +278,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
           summary: encodeModelSetting(f.summary),
           image:   encodeModelSetting(f.image),
           voice:   encodeModelSetting(f.voice),
+          video:   encodeModelSetting(f.video),
           request_delay:   parseInt(f.request_delay)   || 0,
           request_timeout: parseInt(f.request_timeout) || 0,
         }),
@@ -283,6 +288,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
       delete payload.summary;
       delete payload.image;
       delete payload.voice;
+      delete payload.video;
       delete payload.request_delay;
       delete payload.request_timeout;
 
@@ -416,6 +422,7 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
       {renderModelSection("summary", "📝 Summary Model",                          false, "Mistral (falls back to Chat if empty)")}
       {renderModelSection("image",   "🖼️ Image Model (Vision capabilities)",      false, "gpt-4o-mini (falls back to Chat if empty)")}
       {renderModelSection("voice",   "🎙️ Voice Model (Audio / Speech capabilities)", false, "whisper-1")}
+      {renderModelSection("video",   "🎥 Video Model (Video Clip analysis capabilities)", false, "Qwen2.5-VL-7B (falls back to Chat if empty)")}
 
       <div className="responsive-grid" style={{ gap: 16, marginTop: 16 }}>
         <Field label="Request Delay (seconds)">
@@ -544,6 +551,7 @@ export default function ModelConfigs() {
                     {renderSetting("📝 Summary", cfg.summary)}
                     {renderSetting("🖼️ Image",   cfg.image)}
                     {renderSetting("🎙️ Voice",   cfg.voice)}
+                    {renderSetting("🎥 Video",   cfg.video)}
                   </div>
                 );
               })()}

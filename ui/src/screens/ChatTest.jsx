@@ -23,6 +23,7 @@ function readFileAsBase64(file) {
 
 function AttachmentPreview({ file, objectUrl, onClear }) {
   const isImage = file.type.startsWith("image/");
+  const isVideo = file.type.startsWith("video/");
   return (
     <div
       style={{
@@ -42,6 +43,18 @@ function AttachmentPreview({ file, objectUrl, onClear }) {
           style={{
             height: 48,
             width: 48,
+            objectFit: "cover",
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+          }}
+        />
+      ) : isVideo ? (
+        <video
+          src={objectUrl}
+          controls
+          style={{
+            height: 48,
+            width: 64,
             objectFit: "cover",
             borderRadius: 6,
             border: "1px solid var(--border)",
@@ -80,7 +93,7 @@ function AttachmentPreview({ file, objectUrl, onClear }) {
         <div style={{ fontSize: 11, color: "var(--muted)" }}>
           {file.type} · {(file.size / 1024).toFixed(1)} KB
         </div>
-        {!isImage && (
+        {!isImage && !isVideo && (
           <audio
             src={objectUrl}
             controls
@@ -114,6 +127,22 @@ function BubbleAttachment({ mediaType, mediaData }) {
           display: "block",
           maxWidth: 180,
           maxHeight: 140,
+          borderRadius: 6,
+          marginBottom: 4,
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      />
+    );
+  }
+  if (mediaType.startsWith("video/")) {
+    return (
+      <video
+        src={src}
+        controls
+        style={{
+          display: "block",
+          maxWidth: 220,
+          maxHeight: 160,
           borderRadius: 6,
           marginBottom: 4,
           border: "1px solid rgba(255,255,255,0.1)",
@@ -202,7 +231,7 @@ export default function ChatTest() {
     // Snapshot attachment so the bubble keeps its own copy
     const sentMediaData = attachB64 || null;
     const sentMediaType = attachFile?.type || null;
-    const sentText = text || (hasMedia ? `[${attachFile.type.startsWith("image/") ? "Image" : "Voice Note"}]` : "");
+    const sentText = text || (hasMedia ? `[${attachFile.type.startsWith("image/") ? "Image" : attachFile.type.startsWith("video/") ? "Video Clip" : "Voice Note"}]` : "");
 
     setMsg("");
     clearAttachment();
@@ -407,17 +436,17 @@ export default function ChatTest() {
             alignItems: "center",
           }}
         >
-          {/* Hidden file input – accepts images and audio */}
+          {/* Hidden file input – accepts images, audio, and video */}
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,audio/*"
+            accept="image/*,audio/*,video/*"
             style={{ display: "none" }}
             onChange={handleFileChange}
           />
           <button
             className="btn btn-secondary"
-            title="Attach image or voice note"
+            title="Attach image, video clip, or voice note"
             disabled={!selected || sending}
             onClick={() => fileInputRef.current?.click()}
             style={{ flexShrink: 0, fontSize: 18, padding: "4px 10px" }}
@@ -482,7 +511,7 @@ export default function ChatTest() {
             Show raw JSON response
           </label>
           <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
-            📎 Attach image or audio to test multimodal analysis
+            📎 Attach image, video, or audio to test multimodal analysis
           </span>
         </div>
       </div>

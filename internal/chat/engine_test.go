@@ -181,6 +181,10 @@ func (m *multiModalMockLLM) Chat(ctx context.Context, model string, msgs []llm.M
 			m.calls = append(m.calls, msg)
 			return "Mock voice transcription: hello this is a voice note", llm.Stats{}, nil
 		}
+		if msg.Role == "user" && len(msg.Videos) > 0 {
+			m.calls = append(m.calls, msg)
+			return "Mock video description: person waving at camera outdoors", llm.Stats{}, nil
+		}
 	}
 	m.calls = append(m.calls, msgs...)
 	return "mock reply to snap", llm.Stats{}, nil
@@ -343,6 +347,54 @@ func TestMultiModalAutoReply(t *testing.T) {
 	}
 	if voiceMsg.MediaDescription != "Voice Note: Mock voice transcription: hello this is a voice note" {
 		t.Errorf("expected voice note media description, got %s", voiceMsg.MediaDescription)
+	}
+
+	// Test video route
+	mockClient.modelsUsed = nil
+	mockClient.calls = nil
+	err = store.UpsertModelConfig(&db.ModelConfig{
+		Scope:   "conversation",
+		ScopeID: conv.ID,
+		Value:   `{"chat": {"model": "json-main-model"}, "video": {"model": "json-video-model"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.MessageID = "msg463"
+	req.Timestamp = "2026-05-02T19:07:00Z"
+	req.MediaType = "video/mp4"
+	req.MediaData = base64.StdEncoding.EncodeToString([]byte("fake video mp4 bytes"))
+	_, err = engine.HandleAutoReply(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mockClient.modelsUsed) < 2 {
+		t.Fatalf("expected at least 2 models used for video, got %v", mockClient.modelsUsed)
+	}
+	if mockClient.modelsUsed[0] != "json-video-model" {
+		t.Errorf("expected video model to be json-video-model, got %s", mockClient.modelsUsed[0])
+	}
+	if mockClient.modelsUsed[1] != "json-main-model" {
+		t.Errorf("expected main model to be json-main-model, got %s", mockClient.modelsUsed[1])
+	}
+
+	msgs, err = store.ListMessages(conv.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vidMsg *db.Message
+	for _, m := range msgs {
+		if m.Timestamp == "2026-05-02T19:07:00Z" {
+			vidMsg = &m
+			break
+		}
+	}
+	if vidMsg == nil {
+		t.Fatal("video message not found in db")
+	}
+	if vidMsg.MediaDescription != "Video Clip: Mock video description: person waving at camera outdoors" {
+		t.Errorf("expected video clip media description, got %s", vidMsg.MediaDescription)
 	}
 }
 

@@ -46,6 +46,7 @@ type ModelConfig struct {
 	Summary        ModelSetting `json:"summary"`
 	Image          ModelSetting `json:"image"`
 	Voice          ModelSetting `json:"voice"`
+	Video          ModelSetting `json:"video"`
 	RequestDelay   int          `json:"request_delay"`
 	RequestTimeout int          `json:"request_timeout"`
 }
@@ -205,6 +206,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	mediaDescription := ""
 	if req.MediaData != "" {
 		isAudio := strings.HasPrefix(req.MediaType, "audio/")
+		isVideo := strings.HasPrefix(req.MediaType, "video/")
 
 		if isAudio {
 			// Resolve voice client, model, and context window
@@ -244,6 +246,37 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				mediaDescription = "Voice Note: " + strings.TrimSpace(reply)
 				if debugEnabled {
 					log.Printf("[DEBUG] Generated voice transcription/summary: %s", mediaDescription)
+				}
+			}
+		} else if isVideo {
+			// Resolve video client, model, and context window
+			videoClient, videoModel, videoCtxSize, videoParams := e.ResolveLLMClient(conv.ID, req.IntegrationID, cfg.Video, chatModel, cfg.RequestTimeout)
+
+			_ = e.Store.UpdateActivityLog(logID, "in_progress", "Analyzing received video...", "")
+
+			analysisPrompt := "Identify what is happening in this video snap/clip. Describe the main subject, setting, actions, movements, mood, or anything spoken/shown. Summarize what occurs in 1-2 brief, descriptive sentences. Respond ONLY with the final summary."
+
+			prefix := "data:video/mp4;base64,"
+			if req.MediaType != "" {
+				prefix = "data:" + req.MediaType + ";base64,"
+			}
+
+			analysisMsgs := []llm.Message{
+				{
+					Role:    "user",
+					Content: analysisPrompt,
+					Videos:  []string{prefix + req.MediaData},
+				},
+			}
+
+			reply, _, err := videoClient.Chat(ctx, videoModel, analysisMsgs, videoCtxSize, videoParams)
+			if err != nil {
+				log.Printf("[ERROR] Video analysis failed: %v", err)
+				mediaDescription = "Video Clip: (analysis failed)"
+			} else {
+				mediaDescription = "Video Clip: " + strings.TrimSpace(reply)
+				if debugEnabled {
+					log.Printf("[DEBUG] Generated media summary (video): %s", mediaDescription)
 				}
 			}
 		} else {
@@ -419,6 +452,8 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 			if m.MediaDescription != "" {
 				if strings.HasPrefix(m.MediaDescription, "Voice Note: ") {
 					content = fmt.Sprintf("%s\n[%s]", content, m.MediaDescription)
+				} else if strings.HasPrefix(m.MediaDescription, "Video Clip: ") {
+					content = fmt.Sprintf("%s\n[Received Video Snap/Clip: %s]", content, strings.TrimPrefix(m.MediaDescription, "Video Clip: "))
 				} else {
 					content = fmt.Sprintf("%s\n[Received Snap/Image: %s]", content, m.MediaDescription)
 				}
@@ -525,7 +560,7 @@ func (e *Engine) ResolveLLMClient(convID, integrationID string, setting ModelSet
 
 func ParseModelConfig(value string, defaultModel string) ModelConfig {
 	var cfg ModelConfig
-	if err := json.Unmarshal([]byte(value), &cfg); err == nil && (cfg.Chat.Model != "" || cfg.Summary.Model != "" || cfg.Image.Model != "" || cfg.Voice.Model != "") {
+	if err := json.Unmarshal([]byte(value), &cfg); err == nil && (cfg.Chat.Model != "" || cfg.Summary.Model != "" || cfg.Image.Model != "" || cfg.Voice.Model != "" || cfg.Video.Model != "") {
 		return cfg
 	}
 
