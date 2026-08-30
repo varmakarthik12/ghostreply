@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
-import { apiGet } from "./api";
 
 // Fallback build-time version injected by Vite
 const BUILD_TIME_VERSION =
-  typeof __APP_VERSION__ !== "undefined"
+  typeof __APP_VERSION__ !== "undefined" && __APP_VERSION__
     ? __APP_VERSION__
-    : "v1.0.0";
+    : "v1.5.1";
 
-let currentVersion = BUILD_TIME_VERSION;
+let currentVersion = BUILD_TIME_VERSION.startsWith("v")
+  ? BUILD_TIME_VERSION
+  : `v${BUILD_TIME_VERSION}`;
+
 const subscribers = new Set();
 
 function setCachedVersion(v) {
@@ -17,20 +19,50 @@ function setCachedVersion(v) {
   subscribers.forEach((cb) => cb(formatted));
 }
 
-// Fetch from API once
+// Fetch from backend API endpoints (unauthenticated)
 let fetchPromise = null;
 export function fetchAppVersion() {
   if (!fetchPromise) {
-    fetchPromise = apiGet("/version")
-      .then((data) => {
-        if (data?.version) {
-          setCachedVersion(data.version);
+    fetchPromise = (async () => {
+      const ts = Date.now();
+      // Try /api/version first
+      try {
+        const res = await fetch(`/api/version?_=${ts}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.version) {
+            setCachedVersion(data.version);
+            return currentVersion;
+          }
         }
-        return currentVersion;
-      })
-      .catch(() => {
-        return currentVersion;
-      });
+      } catch {}
+
+      // Try top-level /version
+      try {
+        const res = await fetch(`/version?_=${ts}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.version) {
+            setCachedVersion(data.version);
+            return currentVersion;
+          }
+        }
+      } catch {}
+
+      // Try /health
+      try {
+        const res = await fetch(`/health?_=${ts}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.version) {
+            setCachedVersion(data.version);
+            return currentVersion;
+          }
+        }
+      } catch {}
+
+      return currentVersion;
+    })();
   }
   return fetchPromise;
 }

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -222,8 +223,23 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				format = "aac"
 			} else if strings.Contains(req.MediaType, "ogg") || strings.Contains(req.MediaType, "opus") {
 				format = "opus"
-			} else if strings.Contains(req.MediaType, "m4a") {
+			} else if strings.Contains(req.MediaType, "m4a") || strings.Contains(req.MediaType, "mp4") {
 				format = "m4a"
+			} else if strings.Contains(req.MediaType, "3gpp") || strings.Contains(req.MediaType, "3gp") {
+				format = "3gp"
+			}
+
+			// Inspect audio header bytes for precise format
+			if rawAudio, decodeErr := llm.DecodeBase64Flexible(req.MediaData); decodeErr == nil && len(rawAudio) >= 12 {
+				if bytes.HasPrefix(rawAudio, []byte("RIFF")) {
+					format = "wav"
+				} else if bytes.HasPrefix(rawAudio, []byte("OggS")) {
+					format = "opus"
+				} else if len(rawAudio) >= 16 && (bytes.Contains(rawAudio[:16], []byte("ftyp")) || bytes.Contains(rawAudio[:16], []byte("moov"))) {
+					format = "m4a"
+				} else if len(rawAudio) >= 2 && rawAudio[0] == 0xFF && (rawAudio[1]&0xF0) == 0xF0 {
+					format = "aac"
+				}
 			}
 
 			// 1. First try dedicated audio transcription (e.g. Whisper endpoint /v1/audio/transcriptions)

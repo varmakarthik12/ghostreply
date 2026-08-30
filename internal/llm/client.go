@@ -366,7 +366,7 @@ func (c *Client) TranscribeAudio(ctx context.Context, model string, audioBase64 
 	if format == "" {
 		format = "mp3"
 	}
-	rawBytes, err := base64.StdEncoding.DecodeString(audioBase64)
+	rawBytes, err := DecodeBase64Flexible(audioBase64)
 	if err != nil {
 		return "", Stats{}, fmt.Errorf("decode audio base64: %w", err)
 	}
@@ -473,4 +473,36 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 		names = append(names, m.Name)
 	}
 	return names, nil
+}
+
+// DecodeBase64Flexible robustly decodes standard, unpadded, URL-safe, or data-URI prefixed base64 strings.
+func DecodeBase64Flexible(s string) ([]byte, error) {
+	// Strip data URI prefix if present (e.g. data:audio/mpeg;base64,...)
+	if idx := strings.Index(s, ";base64,"); idx != -1 {
+		s = s[idx+8:]
+	} else if strings.HasPrefix(s, "data:") {
+		if idx := strings.Index(s, ","); idx != -1 {
+			s = s[idx+1:]
+		}
+	}
+	// Strip whitespace and newlines
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, " ", "")
+
+	// 1. Try standard encoding
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	// 2. Try raw standard encoding (unpadded)
+	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	// 3. Try URL-safe encoding
+	if b, err := base64.URLEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	// 4. Try raw URL-safe encoding (unpadded)
+	return base64.RawURLEncoding.DecodeString(s)
 }

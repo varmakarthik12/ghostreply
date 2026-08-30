@@ -25,6 +25,10 @@ import (
 )
 
 var (
+	Version   = ""
+	Commit    = ""
+	BuildDate = ""
+
 	portFlag   = flag.String("port", "", "Port to listen on (env: GHOSTREPLY_PORT) (default: 8080)")
 	tokenFlag  = flag.String("token", "", "Bearer token (env: GHOSTREPLY_TOKEN) (auto-generated if empty)")
 	dbPathFlag = flag.String("db-path", "", "SQLite database file path (env: GHOSTREPLY_DB_PATH) (default: ~/.ghostreply/ghostreply.db)")
@@ -127,6 +131,16 @@ func main() {
 		log.Printf("[DB] Warning: failed to create server session: %v", err)
 	}
 
+	if Version != "" {
+		api.Version = Version
+	}
+	if Commit != "" {
+		api.Commit = Commit
+	}
+	if BuildDate != "" {
+		api.BuildDate = BuildDate
+	}
+
 	apiHandler := api.NewAPI(store, token, store.GetConfigValue("llm_url", "http://localhost:11434"), func(baseURL, apiKey string, timeout time.Duration) chat.LLM {
 		// LLM_KEY env is the generic name; fall back to OPENAI_API_KEY for backward compat.
 		key := apiKey
@@ -147,7 +161,11 @@ func main() {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		dbOK := store.Ping() == nil
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","llm_url":"%s","db_ok":%t}`, store.GetConfigValue("llm_url", "http://localhost:11434"), dbOK)
+		fmt.Fprintf(w, `{"status":"ok","llm_url":"%s","db_ok":%t,"version":"%s"}`, store.GetConfigValue("llm_url", "http://localhost:11434"), dbOK, api.Version)
+	})
+	r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"version":"%s","commit":"%s","build_date":"%s"}`, api.Version, api.Commit, api.BuildDate)
 	})
 
 	r.Route("/api", func(r chi.Router) { apiHandler.Mount(r) })

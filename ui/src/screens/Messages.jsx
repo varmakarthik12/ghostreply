@@ -87,9 +87,11 @@ export default function Messages({ initialConv }) {
 
   useEffect(() => {
     if (viewMode === "feed" && s.data?.length) {
-      feedBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      setTimeout(() => {
+        feedBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 50);
     }
-  }, [s.data?.length, viewMode]);
+  }, [convId, s.data?.length, viewMode]);
 
   const conversations = convS.data || [];
   const activeConv = conversations.find((c) => c.id === convId);
@@ -157,6 +159,13 @@ export default function Messages({ initialConv }) {
     }
     return true;
   });
+
+  // For chat feed view: chronological order (oldest at top, newest at bottom)
+  const chronologicalMessages = useMemo(() => {
+    return [...filteredMessages].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [filteredMessages]);
 
   const tableColumns = [
     {
@@ -592,12 +601,12 @@ export default function Messages({ initialConv }) {
               }}
             >
               <div className="chat-bubble-stream">
-                {filteredMessages.length === 0 ? (
+                {chronologicalMessages.length === 0 ? (
                   <div style={{ margin: "auto", textAlign: "center", color: "var(--text-muted)", padding: 48 }}>
                     No messages match the current filter.
                   </div>
                 ) : (
-                  filteredMessages.map((m) => {
+                  chronologicalMessages.map((m) => {
                     const desc = m.media_description || m.MediaDescription;
                     return (
                       <div
