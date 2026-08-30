@@ -264,11 +264,15 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 				})
 			}
 			for _, aud := range m.Audios {
+				audFormat := strings.ToLower(strings.TrimSpace(aud.Format))
+				if audFormat != "wav" && audFormat != "mp3" {
+					audFormat = "mp3"
+				}
 				parts = append(parts, openAIMessagePart{
 					Type: "input_audio",
 					InputAudio: &openAIAudio{
 						Data:   aud.Data,
-						Format: aud.Format,
+						Format: audFormat,
 					},
 				})
 			}
@@ -363,7 +367,8 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 
 // TranscribeAudio sends audio bytes to an OpenAI-compatible /v1/audio/transcriptions endpoint.
 func (c *Client) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, Stats, error) {
-	if format == "" {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" || format == "mpeg" {
 		format = "mp3"
 	}
 	rawBytes, err := DecodeBase64Flexible(audioBase64)

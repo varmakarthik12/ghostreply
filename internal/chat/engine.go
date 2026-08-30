@@ -229,28 +229,35 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				format = "m4a"
 			} else if strings.Contains(req.MediaType, "3gpp") || strings.Contains(req.MediaType, "3gp") {
 				format = "3gp"
+			} else if strings.Contains(req.MediaType, "mpeg") || strings.Contains(req.MediaType, "mp3") {
+				format = "mp3"
 			}
 
 			// Inspect audio header bytes for precise format
-			if rawAudio, decodeErr := llm.DecodeBase64Flexible(req.MediaData); decodeErr == nil && len(rawAudio) >= 12 {
-				if bytes.HasPrefix(rawAudio, []byte("RIFF")) {
+			if rawAudio, decodeErr := llm.DecodeBase64Flexible(req.MediaData); decodeErr == nil && len(rawAudio) >= 2 {
+				if len(rawAudio) >= 12 && bytes.HasPrefix(rawAudio, []byte("RIFF")) {
 					format = "wav"
-				} else if bytes.HasPrefix(rawAudio, []byte("OggS")) {
+				} else if len(rawAudio) >= 12 && bytes.HasPrefix(rawAudio, []byte("OggS")) {
 					format = "opus"
 				} else if len(rawAudio) >= 16 && (bytes.Contains(rawAudio[:16], []byte("ftyp")) || bytes.Contains(rawAudio[:16], []byte("moov"))) {
 					format = "m4a"
-				} else if len(rawAudio) >= 2 && rawAudio[0] == 0xFF && (rawAudio[1]&0xF0) == 0xF0 {
+				} else if rawAudio[0] == 0xFF && (rawAudio[1]&0xF0) == 0xF0 {
 					format = "aac"
+				} else if (rawAudio[0] == 0xFF && (rawAudio[1]&0xE0) == 0xE0) || rawAudio[0] == 0xFB || bytes.HasPrefix(rawAudio, []byte("ID3")) {
+					format = "mp3"
 				}
 			}
 
 			// 1. First try dedicated audio transcription (e.g. Whisper endpoint /v1/audio/transcriptions)
-			// For m4a/mp4 audio, try both format variants.
-			transcriptFormats := []string{format}
-			if format == "m4a" {
-				transcriptFormats = []string{"m4a", "mp4", "mp3"}
-			} else if format == "mp4" {
-				transcriptFormats = []string{"mp4", "m4a", "mp3"}
+			// Try the detected format, then robust fallbacks
+			candidates := []string{format, "mp3", "wav", "m4a", "mp4", "aac", "opus"}
+			seen := make(map[string]bool)
+			var transcriptFormats []string
+			for _, f := range candidates {
+				if !seen[f] {
+					seen[f] = true
+					transcriptFormats = append(transcriptFormats, f)
+				}
 			}
 
 			var transcript string
@@ -259,7 +266,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				transcript, _, transcriptErr = voiceClient.TranscribeAudio(ctx, voiceModel, req.MediaData, tryFormat)
 				if transcriptErr == nil && transcript != "" {
 					if debugEnabled {
-						log.Printf("[DEBUG] Voice transcription succeeded with format=%s", tryFormat)
+						log.Printf("[DEBUG] Voice transcription succeeded with format=%s: %s", tryFormat, transcript)
 					}
 					break
 				}
@@ -275,6 +282,12 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				}
 			} else {
 				// 2. If transcription endpoint fails or returns error, try multimodal Chat endpoint (for direct audio chat models)
+				// OpenAI chat input_audio expects "mp3" or "wav"
+				chatAudioFormat := "mp3"
+				if format == "wav" {
+					chatAudioFormat = "wav"
+				}
+
 				analysisPrompt := "Identify what is spoken in this audio/voice note. Summarize the key message, details, and tone in 1-2 brief, descriptive sentences. Respond ONLY with the final summary."
 				analysisMsgs := []llm.Message{
 					{
@@ -283,7 +296,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 						Audios: []llm.AudioContent{
 							{
 								Data:   req.MediaData,
-								Format: format,
+								Format: chatAudioFormat,
 							},
 						},
 					},

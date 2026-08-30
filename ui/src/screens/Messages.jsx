@@ -77,26 +77,54 @@ export default function Messages({ initialConv }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const prevConvIdRef = useRef(convId);
+  const prevMsgCountRef = useRef(0);
+  const isInitialLoadRef = useRef(true);
+
+  // When convId changes, reset initial load flag
+  useEffect(() => {
+    if (prevConvIdRef.current !== convId) {
+      prevConvIdRef.current = convId;
+      isInitialLoadRef.current = true;
+      prevMsgCountRef.current = 0;
+    }
+  }, [convId]);
+
   // Auto-polling interval
   useEffect(() => {
     if (!autoPoll) return;
     const interval = setInterval(() => {
-      reload();
+      reload(true); // Silent reload: updates data without flashing spinner or resetting scroll
     }, 2500);
     return () => clearInterval(interval);
   }, [convId, autoPoll, reload]);
 
   useEffect(() => {
-    if (viewMode === "feed" && s.data?.length) {
+    if (viewMode !== "feed") return;
+    const count = s.data?.length || 0;
+    const el = chatStreamRef.current;
+    if (!el || count === 0) return;
+
+    const isInitial = isInitialLoadRef.current;
+    const isNewMessage = count > prevMsgCountRef.current;
+    prevMsgCountRef.current = count;
+
+    if (isInitial) {
+      isInitialLoadRef.current = false;
       const timer = setTimeout(() => {
         if (chatStreamRef.current) {
           chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
         }
-        feedBottomRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 60);
       return () => clearTimeout(timer);
+    } else if (isNewMessage) {
+      // If user was already near the bottom (within 160px), smoothly scroll down to the newest message
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceFromBottom < 160) {
+        feedBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
     }
-  }, [convId, s.data?.length, viewMode]);
+  }, [convId, s.data, viewMode]);
 
   const conversations = convS.data || [];
   const activeConv = conversations.find((c) => c.id === convId);
@@ -611,7 +639,7 @@ export default function Messages({ initialConv }) {
           }}
         >
           <div className="chat-bubble-stream" ref={chatStreamRef}>
-            {s.loading ? (
+            {s.loading && !s.data ? (
               <div style={{ margin: "auto", textAlign: "center", padding: 48 }}>
                 <Spinner lg />
                 <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 12 }}>
@@ -695,7 +723,7 @@ export default function Messages({ initialConv }) {
         <DataTable
           columns={tableColumns}
           data={filteredMessages}
-          loading={s.loading}
+          loading={s.loading && !s.data}
           error={s.error}
           selectable
           selectedIds={selectedIds}
