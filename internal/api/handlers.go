@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -13,10 +14,26 @@ import (
 )
 
 var (
-	Version   = "v1.0.0"
+	Version   = "local"
 	Commit    = "none"
 	BuildDate = "unknown"
 )
+
+func init() {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			Version = bi.Main.Version
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && Commit == "none" {
+				Commit = s.Value
+			}
+			if s.Key == "vcs.time" && BuildDate == "unknown" {
+				BuildDate = s.Value
+			}
+		}
+	}
+}
 
 type API struct {
 	Store  *db.Store

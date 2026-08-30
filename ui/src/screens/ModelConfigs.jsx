@@ -18,6 +18,7 @@ import {
   Zap,
   LayoutGrid,
   List,
+  Timer,
 } from "lucide-react";
 import Alert from "../components/Alert";
 import Badge from "../components/Badge";
@@ -38,15 +39,21 @@ const MODEL_SUGGESTIONS = [
   "gemma3:12b",
   "gemma-3-4b-it",
   "mistral",
+  "qwen2.5:7b",
+  "qwen2.5:14b",
+  "deepseek-r1:8b",
+  "deepseek-r1:14b",
+  "llava",
+  "whisper-1",
   "gpt-4o",
   "gpt-4o-mini",
-  "gemini-2.0-flash",
-  "deepseek-r1:8b",
-  "qwen2.5-coder:7b",
+  "gemini-1.5-pro",
+  "gemini-1.5-flash",
+  "claude-3-5-sonnet",
 ];
 
 const THINKING_LEVEL_OPTIONS = [
-  { value: "none", label: "Disabled (0 tokens)" },
+  { value: "none", label: "None / Disabled" },
   { value: "low", label: "Low (~512 tokens)" },
   { value: "medium", label: "Medium (~2,048 tokens)" },
   { value: "high", label: "High (~8,192 tokens)" },
@@ -143,125 +150,147 @@ const encodeModelSetting = (s) => {
 function SamplingSliders({ setting, onUpdate }) {
   const [open, setOpen] = useState(false);
 
-  const applyPreset = (preset) => {
-    if (preset === "creative") {
-      onUpdate("temperature", 1.25);
-      onUpdate("top_p", 0.95);
-      onUpdate("repetition_penalty", 1.15);
-    } else if (preset === "balanced") {
-      onUpdate("temperature", 0.8);
-      onUpdate("top_p", 0.9);
-      onUpdate("repetition_penalty", 1.1);
-    } else if (preset === "strict") {
-      onUpdate("temperature", 0.2);
-      onUpdate("top_p", 0.8);
-      onUpdate("repetition_penalty", 1.05);
-    }
-    toast(`Applied "${preset}" preset`);
-  };
-
   return (
-    <div style={{ marginTop: 12, borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
+    <div style={{ marginTop: 12 }}>
       <button
         type="button"
-        className="btn btn-ghost btn-xs"
+        className="btn btn-ghost btn-sm"
+        style={{ padding: "4px 8px", fontSize: 12, gap: 6, color: "var(--text-muted)" }}
         onClick={() => setOpen(!open)}
-        style={{ width: "100%", justifyContent: "space-between", color: "var(--text-muted)" }}
       >
-        <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-          <Sliders size={13} color="var(--primary)" />
-          <span>Advanced Sampling Parameters & Hyperparameters</span>
-        </span>
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        <Sliders size={13} />
+        <span>{open ? "Hide Advanced Sampling Controls" : "Show Advanced Sampling Controls (Temperature, Top-P, Top-K…)"}</span>
+        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
       </button>
 
       {open && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14 }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", marginRight: 4 }}>Presets:</span>
-            <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("creative")}>
-              🎨 Creative (1.25)
-            </button>
-            <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("balanced")}>
-              ⚖️ Balanced (0.8)
-            </button>
-            <button type="button" className="btn btn-xs btn-secondary" onClick={() => applyPreset("strict")}>
-              🎯 Strict (0.2)
-            </button>
+        <div
+          style={{
+            marginTop: 12,
+            padding: 16,
+            background: "rgba(0,0,0,0.25)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          {/* Temperature */}
+          <div style={{ marginBottom: 14 }}>
+            <div className="flex-row-between" style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-main)" }}>
+                Temperature
+              </label>
+              <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                {setting.temperature}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.0"
+              max="2.0"
+              step="0.05"
+              value={setting.temperature}
+              onChange={(e) => onUpdate("temperature", parseFloat(e.target.value))}
+              style={{ width: "100%" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+              Controls randomness. Higher = creative/expressive; Lower = deterministic/factual.
+            </span>
           </div>
 
-          <div className="grid-2">
-            <div>
-              <div className="flex-row-between" style={{ marginBottom: 4 }}>
-                <label style={{ fontSize: 12, fontWeight: 600 }}>Temperature</label>
-                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
-                  {setting.temperature}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.05"
-                value={setting.temperature}
-                onChange={(e) => onUpdate("temperature", parseFloat(e.target.value))}
-                style={{ width: "100%" }}
-              />
+          {/* Top-P (Nucleus Sampling) */}
+          <div style={{ marginBottom: 14 }}>
+            <div className="flex-row-between" style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-main)" }}>
+                Top-P (Nucleus Sampling)
+              </label>
+              <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                {setting.top_p}
+              </span>
             </div>
+            <input
+              type="range"
+              min="0.0"
+              max="1.0"
+              step="0.01"
+              value={setting.top_p}
+              onChange={(e) => onUpdate("top_p", parseFloat(e.target.value))}
+              style={{ width: "100%" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+              Cumulative probability threshold for next-token selection.
+            </span>
+          </div>
 
-            <div>
-              <div className="flex-row-between" style={{ marginBottom: 4 }}>
-                <label style={{ fontSize: 12, fontWeight: 600 }}>Top P (Nucleus Sampling)</label>
-                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
-                  {setting.top_p}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={setting.top_p}
-                onChange={(e) => onUpdate("top_p", parseFloat(e.target.value))}
-                style={{ width: "100%" }}
-              />
+          {/* Top-K */}
+          <div style={{ marginBottom: 14 }}>
+            <div className="flex-row-between" style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-main)" }}>
+                Top-K
+              </label>
+              <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                {setting.top_k}
+              </span>
             </div>
+            <input
+              type="range"
+              min="0"
+              max="200"
+              step="1"
+              value={setting.top_k}
+              onChange={(e) => onUpdate("top_k", parseInt(e.target.value))}
+              style={{ width: "100%" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+              Limit pool to top K candidates (0 to disable).
+            </span>
+          </div>
 
-            <div>
-              <div className="flex-row-between" style={{ marginBottom: 4 }}>
-                <label style={{ fontSize: 12, fontWeight: 600 }}>Repetition Penalty</label>
-                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
-                  {setting.repetition_penalty}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0.9"
-                max="2"
-                step="0.05"
-                value={setting.repetition_penalty}
-                onChange={(e) => onUpdate("repetition_penalty", parseFloat(e.target.value))}
-                style={{ width: "100%" }}
-              />
+          {/* Repetition Penalty */}
+          <div style={{ marginBottom: 14 }}>
+            <div className="flex-row-between" style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-main)" }}>
+                Repetition Penalty
+              </label>
+              <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                {setting.repetition_penalty}
+              </span>
             </div>
+            <input
+              type="range"
+              min="1.0"
+              max="2.0"
+              step="0.05"
+              value={setting.repetition_penalty}
+              onChange={(e) => onUpdate("repetition_penalty", parseFloat(e.target.value))}
+              style={{ width: "100%" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+              Penalizes repetitive words and verbatim loops.
+            </span>
+          </div>
 
-            <div>
-              <div className="flex-row-between" style={{ marginBottom: 4 }}>
-                <label style={{ fontSize: 12, fontWeight: 600 }}>Top K</label>
-                <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
-                  {setting.top_k}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="128"
-                step="1"
-                value={setting.top_k}
-                onChange={(e) => onUpdate("top_k", parseInt(e.target.value))}
-                style={{ width: "100%" }}
-              />
+          {/* Min-P */}
+          <div>
+            <div className="flex-row-between" style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: "var(--text-main)" }}>
+                Min-P
+              </label>
+              <span className="mono" style={{ fontSize: 12, color: "var(--primary)" }}>
+                {setting.min_p}
+              </span>
             </div>
+            <input
+              type="range"
+              min="0.0"
+              max="0.5"
+              step="0.01"
+              value={setting.min_p}
+              onChange={(e) => onUpdate("min_p", parseFloat(e.target.value))}
+              style={{ width: "100%" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+              Minimum probability relative to the most likely token.
+            </span>
           </div>
         </div>
       )}
@@ -269,34 +298,45 @@ function SamplingSliders({ setting, onUpdate }) {
   );
 }
 
-function CapabilitySection({ icon: Icon, title, desc, setting, onUpdate, suggestions }) {
+function CapabilitySection({
+  icon: Icon,
+  title,
+  desc,
+  setting,
+  onUpdate,
+  suggestions,
+}) {
   return (
     <div
+      className="glass-card"
       style={{
-        background: "rgba(255, 255, 255, 0.02)",
+        padding: 18,
+        marginBottom: 16,
         border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        padding: "16px 20px",
-        marginBottom: 14,
+        borderRadius: "var(--radius-md)",
+        background: "rgba(255, 255, 255, 0.02)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         <div
           style={{
             width: 32,
             height: 32,
-            borderRadius: "var(--radius-md)",
-            background: "rgba(99, 102, 241, 0.12)",
+            borderRadius: "var(--radius-sm)",
+            background: "rgba(99, 102, 241, 0.15)",
             color: "var(--primary)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            flexShrink: 0,
           }}
         >
           <Icon size={16} />
         </div>
         <div>
-          <strong style={{ fontSize: 14, color: "var(--text-main)" }}>{title}</strong>
+          <h4 style={{ fontSize: 14, fontWeight: 600, color: "var(--text-main)", margin: 0 }}>
+            {title}
+          </h4>
           <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>{desc}</p>
         </div>
       </div>
@@ -394,8 +434,8 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
         image: encodeModelSetting(cfg.image),
         voice: encodeModelSetting(cfg.voice),
         video: encodeModelSetting(cfg.video),
-        request_delay: cfg.request_delay,
-        request_timeout: cfg.request_timeout,
+        request_delay: parseInt(cfg.request_delay) || 0,
+        request_timeout: parseInt(cfg.request_timeout) || 0,
       });
 
       if (init?.id) {
@@ -512,6 +552,84 @@ function ModelForm({ init, integrations, ollamaModels, onSave, onCancel }) {
         suggestions={suggestions}
       />
 
+      {/* ── Timing & Latency Controls ── */}
+      <div
+        className="glass-card"
+        style={{
+          padding: 18,
+          marginBottom: 16,
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-md)",
+          background: "rgba(255, 255, 255, 0.02)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "var(--radius-sm)",
+              background: "rgba(234, 179, 8, 0.15)",
+              color: "#eab308",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Clock size={16} />
+          </div>
+          <div>
+            <h4 style={{ fontSize: 14, fontWeight: 600, color: "var(--text-main)", margin: 0 }}>
+              Execution & Response Timing Controls
+            </h4>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+              Configure simulated typing delays and timeout thresholds for this model scope.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid-2">
+          <Field
+            label="Response Delay (ms)"
+            hint="Simulate realistic human typing pause (e.g. 1500 for 1.5s)"
+          >
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={cfg.request_delay || ""}
+              onChange={(e) =>
+                setCfg((prev) => ({
+                  ...prev,
+                  request_delay: parseInt(e.target.value) || 0,
+                }))
+              }
+              placeholder="0 (immediate reply)"
+            />
+          </Field>
+
+          <Field
+            label="Request Timeout (seconds)"
+            hint="Max duration before aborting (0 uses default 300s)"
+          >
+            <input
+              type="number"
+              min="0"
+              step="5"
+              value={cfg.request_timeout || ""}
+              onChange={(e) =>
+                setCfg((prev) => ({
+                  ...prev,
+                  request_timeout: parseInt(e.target.value) || 0,
+                }))
+              }
+              placeholder="0 (default 300s)"
+            />
+          </Field>
+        </div>
+      </div>
+
       <div className="modal-footer-bar">
         <button type="button" className="btn btn-secondary" onClick={onCancel}>
           Cancel
@@ -540,7 +658,7 @@ export default function ModelConfigs() {
     if (!deleteConfirm) return;
     try {
       await apiDel("/model-configs/" + deleteConfirm.id);
-      toast("Model config deleted");
+      toast("Model configuration removed");
       setDeleteConfirm(null);
       reload();
     } catch (e) {
@@ -598,6 +716,17 @@ export default function ModelConfigs() {
                 🎥 Video: <code>{cfg.video.model}</code>
               </div>
             )}
+
+            {(cfg.request_delay > 0 || cfg.request_timeout > 0) && (
+              <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                {cfg.request_delay > 0 && (
+                  <Badge color="yellow">⏱️ {cfg.request_delay}ms delay</Badge>
+                )}
+                {cfg.request_timeout > 0 && (
+                  <Badge color="neutral">⏳ {cfg.request_timeout}s timeout</Badge>
+                )}
+              </div>
+            )}
           </div>
         );
       },
@@ -636,7 +765,7 @@ export default function ModelConfigs() {
             <span>Model Configurations</span>
           </h1>
           <p className="card-subtitle">
-            Configure LLMs, local Ollama models, reasoning budgets, and multimodal vision/audio engines.
+            Configure LLMs, local Ollama models, reasoning budgets, response delays, and multimodal vision/audio engines.
           </p>
         </div>
 
@@ -807,7 +936,7 @@ export default function ModelConfigs() {
                         )}
                       </div>
 
-                      {/* Sampling Tags */}
+                      {/* Sampling Tags & Timing Badges */}
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                         <span style={{ padding: "2px 6px", background: "rgba(255,255,255,0.04)", borderRadius: 4 }}>
                           Temp: <strong style={{ color: "var(--text-main)" }}>{cfg.chat.temperature}</strong>
@@ -818,6 +947,16 @@ export default function ModelConfigs() {
                         <span style={{ padding: "2px 6px", background: "rgba(255,255,255,0.04)", borderRadius: 4 }}>
                           RepPenalty: <strong style={{ color: "var(--text-main)" }}>{cfg.chat.repetition_penalty}</strong>
                         </span>
+                        {cfg.request_delay > 0 && (
+                          <span style={{ padding: "2px 6px", background: "rgba(234, 179, 8, 0.15)", color: "#eab308", borderRadius: 4, fontWeight: 500 }}>
+                            ⏱️ {cfg.request_delay}ms delay
+                          </span>
+                        )}
+                        {cfg.request_timeout > 0 && (
+                          <span style={{ padding: "2px 6px", background: "rgba(255, 255, 255, 0.08)", color: "var(--text-main)", borderRadius: 4 }}>
+                            ⏳ {cfg.request_timeout}s timeout
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -828,10 +967,11 @@ export default function ModelConfigs() {
         </div>
       )}
 
+      {/* ── Modal Dialog ── */}
       {modal && (
         <Modal
           title={modal.id ? "Edit Model Configuration" : "New Model Configuration"}
-          subtitle="Configure Chat, Summary, Vision, Voice, and Sampling parameters"
+          subtitle="Configure specialized LLMs, reasoning budgets, response delay, and sampling parameters"
           onClose={() => setModal(null)}
           wide
         >
@@ -841,7 +981,7 @@ export default function ModelConfigs() {
             ollamaModels={ollamaModels}
             onSave={() => {
               setModal(null);
-              toast("Model config saved successfully");
+              toast("Model configuration saved successfully");
               reload();
             }}
             onCancel={() => setModal(null)}
@@ -849,11 +989,12 @@ export default function ModelConfigs() {
         </Modal>
       )}
 
+      {/* ── Confirm Delete Dialog ── */}
       <ConfirmDialog
         isOpen={!!deleteConfirm}
         title="Delete Model Configuration"
-        message="Are you sure you want to delete this model configuration? Scope will fallback to global or system defaults."
-        confirmText="Delete Config"
+        message={`Are you sure you want to remove this ${deleteConfirm?.scope} model configuration? System will fall back to higher-level defaults.`}
+        confirmText="Delete Configuration"
         onConfirm={handleDelete}
         onCancel={() => setDeleteConfirm(null)}
       />
