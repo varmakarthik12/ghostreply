@@ -24,17 +24,16 @@ export default function Navbar({
     <header className="top-navbar">
       <div className="navbar-left">
         <button
-          className="btn btn-ghost btn-icon-only mobile-only"
+          className="btn btn-ghost btn-icon-only navbar-mobile-toggle"
           onClick={onOpenSidebar}
-          style={{ display: "none" }}
           title="Open menu"
         >
           <Menu size={20} />
         </button>
 
         <div className="breadcrumb-trail">
-          <span className="breadcrumb-item">GhostReply</span>
-          <span style={{ color: "var(--text-subtle)" }}>/</span>
+          <span className="breadcrumb-item desktop-only">GhostReply</span>
+          <span className="desktop-only" style={{ color: "var(--text-subtle)" }}>/</span>
           <span className="breadcrumb-item active">{screenTitle || screen}</span>
         </div>
       </div>
@@ -42,24 +41,18 @@ export default function Navbar({
       <div className="navbar-right">
         {/* Command Palette Trigger Button */}
         <button
-          className="btn btn-secondary btn-sm"
+          className="btn btn-secondary btn-sm navbar-search-btn"
           onClick={onOpenCommandPalette}
-          style={{
-            gap: 10,
-            padding: "6px 12px",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid var(--border)",
-            color: "var(--text-muted)",
-          }}
           title="Search or jump to screen (Ctrl+K)"
         >
           <Search size={14} />
-          <span style={{ fontSize: 12 }}>Search…</span>
-          <kbd style={{ fontSize: 10 }}>{isMac ? "⌘K" : "Ctrl+K"}</kbd>
+          <span className="desktop-only" style={{ fontSize: 12 }}>Search…</span>
+          <kbd className="desktop-only" style={{ fontSize: 10 }}>{isMac ? "⌘K" : "Ctrl+K"}</kbd>
         </button>
 
         {/* Server Status Pill */}
         <div
+          className="navbar-status-pill"
           style={{
             display: "flex",
             alignItems: "center",
@@ -74,12 +67,13 @@ export default function Navbar({
           }}
         >
           <span className={`status-dot ${serverStatus === "ok" ? "green" : "red"} status-dot-pulse`} />
-          <span>{serverStatus === "ok" ? "Server Online" : "Server Disconnected"}</span>
+          <span className="desktop-only">{serverStatus === "ok" ? "Server Online" : "Disconnected"}</span>
         </div>
 
         {/* Token snippet & Logout button */}
         {tokenPrefix && (
           <div
+            className="navbar-token-badge desktop-only"
             style={{
               display: "flex",
               alignItems: "center",

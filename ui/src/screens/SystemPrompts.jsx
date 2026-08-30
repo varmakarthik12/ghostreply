@@ -231,7 +231,7 @@ function PromptForm({ init, integrations, onSave, onCancel }) {
 
       {/* ── Spacious Studio Editor / Preview Canvas ── */}
       {editorTab === "split" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div className="split-editor-grid" style={{ marginBottom: 16 }}>
           <div>
             <textarea
               value={f.text}
@@ -500,7 +500,7 @@ export default function SystemPrompts() {
         /* ── Spacious Grid View ── */
         <div>
           {s.loading ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: 20 }}>
+            <div className="persona-cards-grid">
               {Array.from({ length: 2 }).map((_, i) => (
                 <div key={i} className="glass-card" style={{ height: 320 }}>
                   <div className="skeleton" style={{ width: "30%", height: 20, marginBottom: 16 }} />
@@ -525,7 +525,7 @@ export default function SystemPrompts() {
               </div>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: 20 }}>
+            <div className="persona-cards-grid">
               {prompts.map((p) => {
                 const words = p.text.trim() ? p.text.trim().split(/\s+/).length : 0;
                 const chars = p.text.length;

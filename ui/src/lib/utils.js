@@ -1,9 +1,25 @@
 export const shortId = (id, len = 8) => (id ? (id.length > len ? id.slice(0, len) + "…" : id) : "—");
 
+export function parseDate(d) {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d;
+  if (typeof d === "number") return new Date(d);
+  if (typeof d === "string") {
+    const s = d.trim();
+    const num = Number(s);
+    if (!isNaN(num) && s !== "" && num > 100000000) {
+      return new Date(num < 10000000000 ? num * 1000 : num);
+    }
+    const dt = new Date(s);
+    if (!isNaN(dt.getTime())) return dt;
+  }
+  return null;
+}
+
 export function fmtDate(d) {
   if (!d) return "—";
-  const dt = new Date(d);
-  if (isNaN(dt.getTime())) return String(d);
+  const dt = parseDate(d);
+  if (!dt) return String(d);
   return dt.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
@@ -15,8 +31,8 @@ export function fmtDate(d) {
 
 export function fmtTime(d) {
   if (!d) return "—";
-  const dt = new Date(d);
-  if (isNaN(dt.getTime())) return String(d);
+  const dt = parseDate(d);
+  if (!dt) return String(d);
   return dt.toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
@@ -26,8 +42,8 @@ export function fmtTime(d) {
 
 export function fmtRelative(d) {
   if (!d) return "—";
-  const dt = new Date(d);
-  if (isNaN(dt.getTime())) return String(d);
+  const dt = parseDate(d);
+  if (!dt) return String(d);
   const now = new Date();
   const diffSec = Math.floor((now - dt) / 1000);
 

@@ -386,30 +386,54 @@ func (s *Store) DeleteConversation(id string) error {
 
 func (s *Store) ListMessages(conversationID string, limit int) ([]Message, error) {
 	if limit <= 0 {
-		limit = -1
+		limit = 100
 	}
-	// Use ROW_NUMBER() to deduplicate.
-	// This handles cases where duplicates might exist due to race conditions or sync issues.
-	q := `
-		SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp, COALESCE(media_description, '')
-		FROM (
-			SELECT id, conversation_id, is_outbound, content, 
-			       COALESCE(sender_id,'') as sender_id, 
-			       COALESCE(sender_name,'') as sender_name, 
-			       COALESCE(dedup_hash,'') as dedup_hash, 
-			       timestamp,
-			       media_description,
-			       ROW_NUMBER() OVER (
-			           PARTITION BY conversation_id, is_outbound, content, timestamp 
-			           ORDER BY id
-			       ) as rn
-			FROM messages
-			WHERE conversation_id=?
-		)
-		WHERE rn = 1
-		ORDER BY timestamp DESC
-		LIMIT ?`
-	rows, err := s.DB.Query(q, conversationID, limit)
+	var rows *sql.Rows
+	var err error
+
+	if conversationID != "" && conversationID != "all" {
+		q := `
+			SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp, COALESCE(media_description, '')
+			FROM (
+				SELECT id, conversation_id, is_outbound, content, 
+				       COALESCE(sender_id,'') as sender_id, 
+				       COALESCE(sender_name,'') as sender_name, 
+				       COALESCE(dedup_hash,'') as dedup_hash, 
+				       timestamp,
+				       media_description,
+				       ROW_NUMBER() OVER (
+				           PARTITION BY conversation_id, is_outbound, content, timestamp 
+				           ORDER BY id
+				       ) as rn
+				FROM messages
+				WHERE conversation_id=?
+			)
+			WHERE rn = 1
+			ORDER BY timestamp DESC
+			LIMIT ?`
+		rows, err = s.DB.Query(q, conversationID, limit)
+	} else {
+		q := `
+			SELECT id, conversation_id, is_outbound, content, sender_id, sender_name, dedup_hash, timestamp, COALESCE(media_description, '')
+			FROM (
+				SELECT id, conversation_id, is_outbound, content, 
+				       COALESCE(sender_id,'') as sender_id, 
+				       COALESCE(sender_name,'') as sender_name, 
+				       COALESCE(dedup_hash,'') as dedup_hash, 
+				       timestamp,
+				       media_description,
+				       ROW_NUMBER() OVER (
+				           PARTITION BY conversation_id, is_outbound, content, timestamp 
+				           ORDER BY id
+				       ) as rn
+				FROM messages
+			)
+			WHERE rn = 1
+			ORDER BY timestamp DESC
+			LIMIT ?`
+		rows, err = s.DB.Query(q, limit)
+	}
+
 	if err != nil {
 		return nil, err
 	}

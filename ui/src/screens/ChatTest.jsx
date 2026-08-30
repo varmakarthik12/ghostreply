@@ -340,7 +340,7 @@ export default function ChatTest() {
       </div>
 
       {/* ── Studio Split-Screen Layout ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 20 }}>
+      <div className="playground-split-layout">
         {/* ── Left Sidebar Controls ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="glass-card" style={{ padding: 18, marginBottom: 0 }}>

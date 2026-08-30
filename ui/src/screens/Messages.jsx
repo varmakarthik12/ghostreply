@@ -33,7 +33,7 @@ import Spinner from "../components/Spinner";
 import { useResource } from "../lib/hooks";
 import { apiGet, apiDel } from "../lib/api";
 import { toast } from "../lib/toast";
-import { fmtDate, fmtTime, fmtRelative, shortId, platformColor } from "../lib/utils";
+import { fmtDate, fmtTime, fmtRelative, shortId, platformColor, parseDate } from "../lib/utils";
 
 export default function Messages({ initialConv }) {
   const [convS] = useResource(() => apiGet("/conversations"), []);
@@ -57,12 +57,13 @@ export default function Messages({ initialConv }) {
     }
   }, [initialConv]);
 
-  const url = convId ? "/messages?conversation_id=" + convId : null;
+  const url = convId ? "/messages?conversation_id=" + convId : "/messages";
   const [s, reload] = useResource(
-    () => (url ? apiGet(url) : Promise.resolve([])),
+    () => apiGet(url),
     [url]
   );
 
+  const chatStreamRef = useRef(null);
   const feedBottomRef = useRef(null);
 
   // Close combobox when clicking outside
@@ -78,7 +79,7 @@ export default function Messages({ initialConv }) {
 
   // Auto-polling interval
   useEffect(() => {
-    if (!convId || !autoPoll) return;
+    if (!autoPoll) return;
     const interval = setInterval(() => {
       reload();
     }, 2500);
@@ -87,14 +88,19 @@ export default function Messages({ initialConv }) {
 
   useEffect(() => {
     if (viewMode === "feed" && s.data?.length) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        if (chatStreamRef.current) {
+          chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
+        }
         feedBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 50);
+      }, 60);
+      return () => clearTimeout(timer);
     }
   }, [convId, s.data?.length, viewMode]);
 
   const conversations = convS.data || [];
   const activeConv = conversations.find((c) => c.id === convId);
+  const convMap = useMemo(() => Object.fromEntries(conversations.map((c) => [c.id, c])), [conversations]);
 
   // Filter conversations for the searchable typeahead combobox
   const filteredConversations = useMemo(() => {
@@ -110,7 +116,7 @@ export default function Messages({ initialConv }) {
   }, [conversations, convSearch]);
 
   const handleSelectConversation = (c) => {
-    setConvId(c.id);
+    setConvId(c ? c.id : "");
     setConvSearch("");
     setIsDropdownOpen(false);
     setSelectedIds([]);
@@ -160,14 +166,39 @@ export default function Messages({ initialConv }) {
     return true;
   });
 
-  // For chat feed view: chronological order (oldest at top, newest at bottom)
+  // For chat feed view: strict chronological order (oldest at top, latest/newest at bottom)
   const chronologicalMessages = useMemo(() => {
-    return [...filteredMessages].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    return [...filteredMessages].sort((a, b) => {
+      const da = parseDate(a.timestamp);
+      const db = parseDate(b.timestamp);
+      const ta = da ? da.getTime() : 0;
+      const tb = db ? db.getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return (a.id || "").localeCompare(b.id || "");
+    });
   }, [filteredMessages]);
 
   const tableColumns = [
+    ...(!convId
+      ? [
+          {
+            header: "Recipient / Thread",
+            key: "conversation_id",
+            width: 180,
+            render: (r) => {
+              const c = convMap[r.conversation_id];
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {c?.platform && <Badge color={platformColor(c.platform)}>{c.platform}</Badge>}
+                  <span style={{ fontSize: 12, fontWeight: 500 }} className="truncate-text">
+                    {c?.title || c?.external_id || r.sender_name || shortId(r.conversation_id)}
+                  </span>
+                </div>
+              );
+            },
+          },
+        ]
+      : []),
     {
       header: "Direction",
       key: "is_outbound",
@@ -186,7 +217,7 @@ export default function Messages({ initialConv }) {
       key: "content",
       render: (r) => (
         <div style={{ wordBreak: "break-word", lineHeight: 1.5, color: "var(--text-main)" }}>
-          {r.content || <span style={{ color: "var(--text-subtle)", fontStyle: "italic" }}>[Empty text content]</span>}
+          {r.content || <span style={{ color: "var(--text-subtle)", fontStyle: "italic" }}>[Empty text / Media attachment]</span>}
         </div>
       ),
     },
@@ -247,7 +278,7 @@ export default function Messages({ initialConv }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* ── Header ── */}
-      <div className="flex-row-between">
+      <div className="flex-row-between" style={{ flexWrap: "wrap", gap: 14 }}>
         <div>
           <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Send size={24} color="var(--primary)" />
@@ -258,56 +289,52 @@ export default function Messages({ initialConv }) {
           </p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {convId && (
-            <>
-              {/* Auto Poll Toggle */}
-              <button
-                className={`btn btn-sm ${autoPoll ? "btn-secondary" : "btn-ghost"}`}
-                onClick={() => setAutoPoll(!autoPoll)}
-                title={autoPoll ? "Pause Live Polling" : "Resume Live Polling"}
-              >
-                {autoPoll ? <Pause size={13} color="var(--success)" /> : <Play size={13} />}
-                <span>{autoPoll ? "Live Polling" : "Paused"}</span>
-              </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {/* Auto Poll Toggle */}
+          <button
+            className={`btn btn-sm ${autoPoll ? "btn-secondary" : "btn-ghost"}`}
+            onClick={() => setAutoPoll(!autoPoll)}
+            title={autoPoll ? "Pause Live Polling" : "Resume Live Polling"}
+          >
+            {autoPoll ? <Pause size={13} color="var(--success)" /> : <Play size={13} />}
+            <span>{autoPoll ? "Live Polling" : "Paused"}</span>
+          </button>
 
-              {/* View Switcher */}
-              <div
-                style={{
-                  display: "flex",
-                  background: "rgba(255, 255, 255, 0.04)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-md)",
-                  padding: 3,
-                }}
-              >
-                <button
-                  className={`btn btn-sm ${viewMode === "feed" ? "btn-primary" : "btn-ghost"}`}
-                  onClick={() => setViewMode("feed")}
-                  style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
-                  title="Chat Stream View"
-                >
-                  <MessageSquare size={15} />
-                </button>
-                <button
-                  className={`btn btn-sm ${viewMode === "table" ? "btn-primary" : "btn-ghost"}`}
-                  onClick={() => setViewMode("table")}
-                  style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
-                  title="Audit Table View"
-                >
-                  <List size={15} />
-                </button>
-              </div>
+          {/* View Switcher */}
+          <div
+            style={{
+              display: "flex",
+              background: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: 3,
+            }}
+          >
+            <button
+              className={`btn btn-sm ${viewMode === "feed" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setViewMode("feed")}
+              style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
+              title="Chat Stream View"
+            >
+              <MessageSquare size={15} />
+            </button>
+            <button
+              className={`btn btn-sm ${viewMode === "table" ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setViewMode("table")}
+              style={{ borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
+              title="Audit Table View"
+            >
+              <List size={15} />
+            </button>
+          </div>
 
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={reload}
-                title="Manual refresh"
-              >
-                <RefreshCw size={14} />
-              </button>
-            </>
-          )}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={reload}
+            title="Manual refresh"
+          >
+            <RefreshCw size={14} />
+          </button>
 
           {selectedIds.length > 0 && (
             <button
@@ -337,7 +364,7 @@ export default function Messages({ initialConv }) {
           <div ref={dropdownRef} style={{ position: "relative", flex: 1, minWidth: 280, maxWidth: 480, overflow: "visible" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-main)", whiteSpace: "nowrap" }}>
-                Conversation:
+                Filter Thread:
               </span>
 
               <div
@@ -359,7 +386,13 @@ export default function Messages({ initialConv }) {
                 />
                 <input
                   type="text"
-                  value={isDropdownOpen ? convSearch : activeConv ? `${activeConv.title || activeConv.external_id} (${activeConv.external_id})` : ""}
+                  value={
+                    isDropdownOpen
+                      ? convSearch
+                      : activeConv
+                      ? `${activeConv.title || activeConv.external_id} (${activeConv.external_id})`
+                      : "🌐 All Conversations (Global Audit Trail)"
+                  }
                   placeholder={convS.loading ? "Loading conversations…" : "Type to search conversations (e.g. Alex, Telegram)…"}
                   onFocus={() => {
                     setIsDropdownOpen(true);
@@ -395,7 +428,7 @@ export default function Messages({ initialConv }) {
                       padding: 4,
                       display: "flex",
                     }}
-                    title="Clear selection"
+                    title="Clear filter (Show all conversations)"
                   >
                     <X size={14} />
                   </button>
@@ -421,7 +454,7 @@ export default function Messages({ initialConv }) {
                   top: "calc(100% + 6px)",
                   left: 0,
                   right: 0,
-                  maxHeight: 300,
+                  maxHeight: 320,
                   overflowY: "auto",
                   background: "#0f172a",
                   border: "1px solid rgba(255, 255, 255, 0.15)",
@@ -431,7 +464,41 @@ export default function Messages({ initialConv }) {
                   zIndex: 9999,
                 }}
               >
-                {filteredConversations.length === 0 ? (
+                {/* All Conversations Option */}
+                <div
+                  onClick={() => {
+                    setConvId("");
+                    setConvSearch("");
+                    setIsDropdownOpen(false);
+                    setSelectedIds([]);
+                  }}
+                  style={{
+                    padding: "10px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    cursor: "pointer",
+                    background: !convId ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    transition: "background 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (convId) e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (convId) e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Globe size={15} color="var(--primary)" />
+                    <strong style={{ fontSize: 13, color: "var(--text-main)" }}>
+                      🌐 All Conversations (Global Audit Trail)
+                    </strong>
+                  </div>
+                  {!convId && <Check size={16} color="var(--primary)" />}
+                </div>
+
+                {filteredConversations.length === 0 && convSearch.trim() ? (
                   <div style={{ padding: "16px 14px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
                     No conversations matching "{convSearch}"
                   </div>
@@ -482,192 +549,161 @@ export default function Messages({ initialConv }) {
             )}
           </div>
 
-          {activeConv && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                Total: <strong>{rawMessages.length}</strong> messages
-              </div>
-              <Badge color="primary">{activeConv.external_id}</Badge>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              Showing <strong>{filteredMessages.length}</strong> {filteredMessages.length === 1 ? "message" : "messages"}
             </div>
+            {activeConv ? (
+              <Badge color="primary">{activeConv.external_id}</Badge>
+            ) : (
+              <Badge color="purple">Global Audit</Badge>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Filter Toolbar ── */}
+      <div className="flex-row-between" style={{ gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {["all", "in", "out", "media"].map((dir) => (
+            <button
+              key={dir}
+              className={`btn btn-xs ${directionFilter === dir ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setDirectionFilter(dir)}
+            >
+              {dir === "all" && "All Messages"}
+              {dir === "in" && "↓ Inbound Only"}
+              {dir === "out" && "↑ Outbound (AI)"}
+              {dir === "media" && "🖼️ Media Only"}
+            </button>
+          ))}
+        </div>
+
+        <div className="table-search-box" style={{ maxWidth: 260 }}>
+          <Search className="table-search-icon" size={14} />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search messages…"
+            style={{ height: 32, fontSize: 12 }}
+          />
+          {searchTerm && (
+            <button className="table-search-clear" onClick={() => setSearchTerm("")}>
+              <X size={12} />
+            </button>
           )}
         </div>
       </div>
 
-      {/* ── Empty State / Conversation Selector Grid ── */}
-      {!convId ? (
-        <div className="glass-card" style={{ padding: "40px 24px", textAlign: "center" }}>
-          <div className="empty-state-box">
-            <div className="empty-state-icon">
-              <MessageSquare size={32} />
-            </div>
-            <div className="empty-state-title">Select a Conversation</div>
-            <div className="empty-state-desc">
-              Choose an active recipient thread from the search box above or click on one of the conversations below.
-            </div>
-
-            {conversations.length > 0 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                  gap: 12,
-                  marginTop: 24,
-                  textAlign: "left",
-                  width: "100%",
-                }}
-              >
-                {conversations.map((c) => (
-                  <div
-                    key={c.id}
-                    className="glass-card glass-card-interactive"
-                    onClick={() => handleSelectConversation(c)}
-                    style={{
-                      padding: "14px 16px",
-                      cursor: "pointer",
-                      marginBottom: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                    }}
-                  >
-                    <div className="flex-row-between">
-                      <strong style={{ fontSize: 13, color: "var(--text-main)" }} className="truncate-text">
-                        {c.title || "Untitled Conversation"}
-                      </strong>
-                      {c.platform && <Badge color={platformColor(c.platform)}>{c.platform}</Badge>}
-                    </div>
-                    <div className="mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      ID: {c.external_id}
-                    </div>
-                    {c.created_at && (
-                      <div style={{ fontSize: 10, color: "var(--text-subtle)", marginTop: 2 }}>
-                        Created {fmtRelative(c.created_at)}
-                      </div>
-                    )}
-                  </div>
-                ))}
+      {/* ── View Rendering ── */}
+      {viewMode === "feed" ? (
+        <div
+          className="glass-card"
+          style={{
+            padding: 0,
+            minHeight: 500,
+            maxHeight: 680,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            marginBottom: 0,
+          }}
+        >
+          <div className="chat-bubble-stream" ref={chatStreamRef}>
+            {s.loading ? (
+              <div style={{ margin: "auto", textAlign: "center", padding: 48 }}>
+                <Spinner lg />
+                <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 12 }}>
+                  Loading conversation stream…
+                </div>
               </div>
+            ) : chronologicalMessages.length === 0 ? (
+              <div style={{ margin: "auto", textAlign: "center", color: "var(--text-muted)", padding: 48 }}>
+                <div style={{ marginBottom: 8 }}>
+                  <MessageSquare size={32} style={{ opacity: 0.4 }} />
+                </div>
+                <div>No messages found matching the current filter.</div>
+              </div>
+            ) : (
+              chronologicalMessages.map((m) => {
+                const desc = m.media_description || m.MediaDescription;
+                const c = convMap[m.conversation_id];
+                return (
+                  <div
+                    key={m.id}
+                    className={`chat-row ${m.is_outbound ? "outbound" : "inbound"}`}
+                  >
+                    <div className={`chat-avatar ${m.is_outbound ? "ai" : "user"}`}>
+                      {m.is_outbound ? "AI" : <User size={16} />}
+                    </div>
+
+                    <div className="chat-bubble-content">
+                      {!convId && c && (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            marginBottom: 4,
+                            justifyContent: m.is_outbound ? "flex-end" : "flex-start",
+                          }}
+                        >
+                          {c.platform && <Badge color={platformColor(c.platform)}>{c.platform}</Badge>}
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+                            {c.title || c.external_id || (m.sender_name || shortId(m.conversation_id))}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className={`chat-bubble ${m.is_outbound ? "outbound" : "inbound"}`}>
+                        {desc && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              background: m.is_outbound ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.06)",
+                              border: "1px solid rgba(255,255,255,0.1)",
+                              marginBottom: m.content ? 8 : 0,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            {desc.startsWith("Voice Note:") ? <Mic size={14} /> : desc.startsWith("Video Clip:") ? <VideoIcon size={14} /> : <ImageIcon size={14} />}
+                            <span>{desc}</span>
+                          </div>
+                        )}
+                        <div>{m.content}</div>
+                      </div>
+                      <div
+                        className="chat-timestamp"
+                        style={{ textAlign: m.is_outbound ? "right" : "left" }}
+                      >
+                        {fmtTime(m.timestamp)} · {fmtDate(m.timestamp)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
             )}
+            <div ref={feedBottomRef} />
           </div>
         </div>
       ) : (
-        <>
-          {/* ── Filter Toolbar ── */}
-          <div className="flex-row-between" style={{ gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["all", "in", "out", "media"].map((dir) => (
-                <button
-                  key={dir}
-                  className={`btn btn-xs ${directionFilter === dir ? "btn-primary" : "btn-secondary"}`}
-                  onClick={() => setDirectionFilter(dir)}
-                >
-                  {dir === "all" && "All Messages"}
-                  {dir === "in" && "↓ Inbound Only"}
-                  {dir === "out" && "↑ Outbound (AI)"}
-                  {dir === "media" && "🖼️ Media Only"}
-                </button>
-              ))}
-            </div>
-
-            <div className="table-search-box" style={{ maxWidth: 260 }}>
-              <Search className="table-search-icon" size={14} />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search messages…"
-                style={{ height: 32, fontSize: 12 }}
-              />
-              {searchTerm && (
-                <button className="table-search-clear" onClick={() => setSearchTerm("")}>
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* ── View Rendering ── */}
-          {viewMode === "feed" ? (
-            <div
-              className="glass-card"
-              style={{
-                padding: 0,
-                minHeight: 500,
-                maxHeight: 680,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-                marginBottom: 0,
-              }}
-            >
-              <div className="chat-bubble-stream">
-                {chronologicalMessages.length === 0 ? (
-                  <div style={{ margin: "auto", textAlign: "center", color: "var(--text-muted)", padding: 48 }}>
-                    No messages match the current filter.
-                  </div>
-                ) : (
-                  chronologicalMessages.map((m) => {
-                    const desc = m.media_description || m.MediaDescription;
-                    return (
-                      <div
-                        key={m.id}
-                        className={`chat-row ${m.is_outbound ? "outbound" : "inbound"}`}
-                      >
-                        <div className={`chat-avatar ${m.is_outbound ? "ai" : "user"}`}>
-                          {m.is_outbound ? "AI" : <User size={16} />}
-                        </div>
-
-                        <div className="chat-bubble-content">
-                          <div className={`chat-bubble ${m.is_outbound ? "outbound" : "inbound"}`}>
-                            {desc && (
-                              <div
-                                style={{
-                                  fontSize: 12,
-                                  padding: "6px 10px",
-                                  borderRadius: 8,
-                                  background: m.is_outbound ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.06)",
-                                  border: "1px solid rgba(255,255,255,0.1)",
-                                  marginBottom: m.content ? 8 : 0,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 6,
-                                }}
-                              >
-                                {desc.startsWith("Voice Note:") ? <Mic size={14} /> : desc.startsWith("Video Clip:") ? <VideoIcon size={14} /> : <ImageIcon size={14} />}
-                                <span>{desc}</span>
-                              </div>
-                            )}
-                            <div>{m.content}</div>
-                          </div>
-                          <div
-                            className="chat-timestamp"
-                            style={{ textAlign: m.is_outbound ? "right" : "left" }}
-                          >
-                            {fmtTime(m.timestamp)} · {fmtDate(m.timestamp)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={feedBottomRef} />
-              </div>
-            </div>
-          ) : (
-            <DataTable
-              columns={tableColumns}
-              data={filteredMessages}
-              loading={s.loading}
-              error={s.error}
-              selectable
-              selectedIds={selectedIds}
-              onSelectionChange={setSelectedIds}
-              searchPlaceholder="Filter message records…"
-              emptyTitle="No messages found"
-              emptyDescription="No messages found matching your criteria."
-            />
-          )}
-        </>
+        <DataTable
+          columns={tableColumns}
+          data={filteredMessages}
+          loading={s.loading}
+          error={s.error}
+          selectable
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          searchPlaceholder="Filter message records…"
+          emptyTitle="No messages found"
+          emptyDescription="No messages found matching your criteria."
+        />
       )}
 
       {/* ── Single Delete Confirm ── */}

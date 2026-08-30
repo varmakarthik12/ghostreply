@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 
@@ -14,24 +15,42 @@ import (
 )
 
 var (
-	Version   = "v1.0.0"
-	Commit    = "none"
-	BuildDate = "unknown"
+	Version   = ""
+	Commit    = ""
+	BuildDate = ""
 )
 
 func init() {
+	if envVer := os.Getenv("GHOSTREPLY_VERSION"); envVer != "" && Version == "" {
+		Version = envVer
+	}
+	if envCommit := os.Getenv("GHOSTREPLY_COMMIT"); envCommit != "" && Commit == "" {
+		Commit = envCommit
+	}
+	if envDate := os.Getenv("GHOSTREPLY_BUILD_DATE"); envDate != "" && BuildDate == "" {
+		BuildDate = envDate
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
-		if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		if bi.Main.Version != "" && bi.Main.Version != "(devel)" && Version == "" {
 			Version = bi.Main.Version
 		}
 		for _, s := range bi.Settings {
-			if s.Key == "vcs.revision" && Commit == "none" {
+			if s.Key == "vcs.revision" && (Commit == "" || Commit == "none") {
 				Commit = s.Value
 			}
-			if s.Key == "vcs.time" && BuildDate == "unknown" {
+			if s.Key == "vcs.time" && (BuildDate == "" || BuildDate == "unknown") {
 				BuildDate = s.Value
 			}
 		}
+	}
+	if Version == "" {
+		Version = "v1.5.1"
+	}
+	if Commit == "" {
+		Commit = "none"
+	}
+	if BuildDate == "" {
+		BuildDate = "unknown"
 	}
 }
 
@@ -236,11 +255,7 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 	convID := r.URL.Query().Get("conversation_id")
-	if convID == "" {
-		writeJSON(w, 400, map[string]string{"error": "conversation_id required"})
-		return
-	}
-	out, err := a.Store.ListMessages(convID, 50)
+	out, err := a.Store.ListMessages(convID, 100)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

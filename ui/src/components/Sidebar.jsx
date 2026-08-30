@@ -95,11 +95,12 @@ export default function Sidebar({
         </div>
 
         <button
-          className="btn btn-ghost btn-icon-only btn-sm mobile-only"
+          className="btn btn-ghost btn-icon-only btn-sm sidebar-close-btn"
           onClick={onClose}
-          style={{ display: "none", color: "var(--text-muted)" }}
+          title="Close menu"
+          aria-label="Close navigation sidebar"
         >
-          <X size={18} />
+          <X size={20} />
         </button>
       </div>
 
@@ -152,12 +153,6 @@ export default function Sidebar({
           {!collapsed && <span>Change Token</span>}
         </button>
       </div>
-
-      <style>{`
-        @media (max-width: 768px) {
-          .mobile-only { display: flex !important; }
-        }
-      `}</style>
     </aside>
   );
 }
