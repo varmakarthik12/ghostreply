@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS summaries (
 CREATE TABLE IF NOT EXISTS configs (
     id       TEXT PRIMARY KEY,
     scope    TEXT NOT NULL,
-    scope_id TEXT,
+    scope_id TEXT NOT NULL DEFAULT '',
     key      TEXT NOT NULL,
     value    TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -56,9 +56,9 @@ CREATE TABLE IF NOT EXISTS configs (
 CREATE TABLE IF NOT EXISTS model_configs (
     id       TEXT PRIMARY KEY,
     scope    TEXT NOT NULL,
-    scope_id TEXT,
+    scope_id TEXT NOT NULL DEFAULT '',
     value    TEXT NOT NULL,
-    UNIQUE(scope)
+    UNIQUE(scope, scope_id)
 );
 
 CREATE TABLE IF NOT EXISTS identity_links (
@@ -71,9 +71,11 @@ CREATE TABLE IF NOT EXISTS identity_links (
 CREATE TABLE IF NOT EXISTS system_prompts (
     id       TEXT PRIMARY KEY,
     scope    TEXT NOT NULL,
-    scope_id TEXT,
-    text     TEXT NOT NULL
+    scope_id TEXT NOT NULL DEFAULT '',
+    text     TEXT NOT NULL,
+    UNIQUE(scope, scope_id)
 );
+
 
 CREATE TABLE IF NOT EXISTS server_sessions (
     id         TEXT PRIMARY KEY,

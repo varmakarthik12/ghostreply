@@ -41,3 +41,4 @@ build/
 .env
 ghostreply
 workbook.txt
+prompts/

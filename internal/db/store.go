@@ -103,14 +103,56 @@ func (s *Store) Migrate() error {
 			_, _ = tx.Exec(`CREATE TABLE configs (
 				id       TEXT PRIMARY KEY,
 				scope    TEXT NOT NULL,
-				scope_id TEXT,
+				scope_id TEXT NOT NULL DEFAULT '',
 				key      TEXT NOT NULL,
 				value    TEXT NOT NULL,
 				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 				UNIQUE(scope, scope_id, key)
 			)`)
-			_, _ = tx.Exec("INSERT INTO configs (id, scope, scope_id, key, value, updated_at) SELECT id, scope, scope_id, key, value, COALESCE(updated_at, CURRENT_TIMESTAMP) FROM configs_old")
+			_, _ = tx.Exec("INSERT INTO configs (id, scope, scope_id, key, value, updated_at) SELECT id, scope, COALESCE(scope_id, ''), key, value, COALESCE(updated_at, CURRENT_TIMESTAMP) FROM configs_old")
 			_, _ = tx.Exec("DROP TABLE configs_old")
+			_ = tx.Commit()
+		}
+	}
+
+	// Migration for model_configs table UNIQUE constraint
+	var modelConfigsSchema string
+	s.DB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='model_configs'").Scan(&modelConfigsSchema)
+	if strings.Contains(modelConfigsSchema, "UNIQUE(scope)") && !strings.Contains(modelConfigsSchema, "UNIQUE(scope, scope_id)") {
+		log.Printf("[DB] Migrating model_configs table to UNIQUE(scope, scope_id)...")
+		tx, err := s.DB.Begin()
+		if err == nil {
+			_, _ = tx.Exec("ALTER TABLE model_configs RENAME TO model_configs_old")
+			_, _ = tx.Exec(`CREATE TABLE model_configs (
+				id       TEXT PRIMARY KEY,
+				scope    TEXT NOT NULL,
+				scope_id TEXT NOT NULL DEFAULT '',
+				value    TEXT NOT NULL,
+				UNIQUE(scope, scope_id)
+			)`)
+			_, _ = tx.Exec("INSERT OR REPLACE INTO model_configs (id, scope, scope_id, value) SELECT id, scope, COALESCE(scope_id, ''), value FROM model_configs_old")
+			_, _ = tx.Exec("DROP TABLE model_configs_old")
+			_ = tx.Commit()
+		}
+	}
+
+	// Migration for system_prompts table UNIQUE constraint
+	var systemPromptsSchema string
+	s.DB.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='system_prompts'").Scan(&systemPromptsSchema)
+	if !strings.Contains(systemPromptsSchema, "UNIQUE(scope, scope_id)") {
+		log.Printf("[DB] Migrating system_prompts table to UNIQUE(scope, scope_id)...")
+		tx, err := s.DB.Begin()
+		if err == nil {
+			_, _ = tx.Exec("ALTER TABLE system_prompts RENAME TO system_prompts_old")
+			_, _ = tx.Exec(`CREATE TABLE system_prompts (
+				id       TEXT PRIMARY KEY,
+				scope    TEXT NOT NULL,
+				scope_id TEXT NOT NULL DEFAULT '',
+				text     TEXT NOT NULL,
+				UNIQUE(scope, scope_id)
+			)`)
+			_, _ = tx.Exec("INSERT OR REPLACE INTO system_prompts (id, scope, scope_id, text) SELECT id, scope, COALESCE(scope_id, ''), text FROM system_prompts_old")
+			_, _ = tx.Exec("DROP TABLE system_prompts_old")
 			_ = tx.Commit()
 		}
 	}
@@ -612,9 +654,10 @@ func (s *Store) UpsertConfig(c *Config) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()
 	}
+	scopeID := c.ScopeID
 	_, err := s.DB.Exec(`INSERT INTO configs (id, scope, scope_id, key, value, updated_at) VALUES (?,?,?,?,?, CURRENT_TIMESTAMP)
 		ON CONFLICT(scope, scope_id, key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`,
-		c.ID, c.Scope, nullable(c.ScopeID), c.Key, c.Value)
+		c.ID, c.Scope, scopeID, c.Key, c.Value)
 	return err
 }
 
@@ -630,7 +673,7 @@ func (s *Store) DeleteConfig(id string) error {
 
 func (s *Store) GetConfigValue(key string, def string) string {
 	var v string
-	err := s.DB.QueryRow(`SELECT value FROM configs WHERE scope='global' AND key=?`, key).Scan(&v)
+	err := s.DB.QueryRow(`SELECT value FROM configs WHERE scope='global' AND key=? ORDER BY rowid DESC LIMIT 1`, key).Scan(&v)
 	if err != nil {
 		return def
 	}
@@ -653,9 +696,9 @@ func (s *Store) ResolveConfig(conversationID, integrationID, key, def string) st
 		var v string
 		var err error
 		if sc.scope == "global" {
-			err = s.DB.QueryRow(`SELECT value FROM configs WHERE scope='global' AND key=?`, key).Scan(&v)
+			err = s.DB.QueryRow(`SELECT value FROM configs WHERE scope='global' AND key=? ORDER BY rowid DESC LIMIT 1`, key).Scan(&v)
 		} else {
-			err = s.DB.QueryRow(`SELECT value FROM configs WHERE scope=? AND scope_id=? AND key=?`, sc.scope, sc.scope_id, key).Scan(&v)
+			err = s.DB.QueryRow(`SELECT value FROM configs WHERE scope=? AND (scope_id=? OR (scope_id IS NULL AND ?='')) AND key=? ORDER BY rowid DESC LIMIT 1`, sc.scope, sc.scope_id, sc.scope_id, key).Scan(&v)
 		}
 		if err == nil && v != "" {
 			return v
@@ -685,9 +728,10 @@ func (s *Store) UpsertModelConfig(m *ModelConfig) error {
 	if m.ID == "" {
 		m.ID = uuid.NewString()
 	}
+	scopeID := m.ScopeID
 	_, err := s.DB.Exec(`INSERT INTO model_configs (id, scope, scope_id, value) VALUES (?,?,?,?)
-		ON CONFLICT(scope) DO UPDATE SET scope_id=excluded.scope_id, value=excluded.value`,
-		m.ID, m.Scope, nullable(m.ScopeID), m.Value)
+		ON CONFLICT(scope, scope_id) DO UPDATE SET value=excluded.value`,
+		m.ID, m.Scope, scopeID, m.Value)
 	return err
 }
 
@@ -718,9 +762,9 @@ func (s *Store) ResolveModel(conversationID, integrationID, defaultModel string)
 		var v string
 		var err error
 		if sc.scope == "global" {
-			err = s.DB.QueryRow(`SELECT value FROM model_configs WHERE scope='global'`).Scan(&v)
+			err = s.DB.QueryRow(`SELECT value FROM model_configs WHERE scope='global' ORDER BY rowid DESC LIMIT 1`).Scan(&v)
 		} else {
-			err = s.DB.QueryRow(`SELECT value FROM model_configs WHERE scope=? AND scope_id=?`, sc.scope, sc.scopeID).Scan(&v)
+			err = s.DB.QueryRow(`SELECT value FROM model_configs WHERE scope=? AND (scope_id=? OR (scope_id IS NULL AND ?='')) ORDER BY rowid DESC LIMIT 1`, sc.scope, sc.scopeID, sc.scopeID).Scan(&v)
 		}
 		if err == nil && v != "" {
 			return v
@@ -838,8 +882,10 @@ func (s *Store) CreateSystemPrompt(p *SystemPrompt) error {
 	if p.ID == "" {
 		p.ID = uuid.NewString()
 	}
-	_, err := s.DB.Exec(`INSERT INTO system_prompts (id, scope, scope_id, text) VALUES (?,?,?,?)`,
-		p.ID, p.Scope, nullable(p.ScopeID), p.Text)
+	scopeID := p.ScopeID
+	_, err := s.DB.Exec(`INSERT INTO system_prompts (id, scope, scope_id, text) VALUES (?,?,?,?)
+		ON CONFLICT(scope, scope_id) DO UPDATE SET text=excluded.text`,
+		p.ID, p.Scope, scopeID, p.Text)
 	return err
 }
 
@@ -870,9 +916,9 @@ func (s *Store) ResolvePersona(conversationID, integrationID string) string {
 		var v string
 		var err error
 		if sc.scope == "global" {
-			err = s.DB.QueryRow(`SELECT text FROM system_prompts WHERE scope='global' ORDER BY rowid LIMIT 1`).Scan(&v)
+			err = s.DB.QueryRow(`SELECT text FROM system_prompts WHERE scope='global' ORDER BY rowid DESC LIMIT 1`).Scan(&v)
 		} else {
-			err = s.DB.QueryRow(`SELECT text FROM system_prompts WHERE scope=? AND scope_id=? ORDER BY rowid LIMIT 1`, sc.scope, sc.scopeID).Scan(&v)
+			err = s.DB.QueryRow(`SELECT text FROM system_prompts WHERE scope=? AND (scope_id=? OR (scope_id IS NULL AND ?='')) ORDER BY rowid DESC LIMIT 1`, sc.scope, sc.scopeID, sc.scopeID).Scan(&v)
 		}
 		if err == nil && v != "" {
 			return v
