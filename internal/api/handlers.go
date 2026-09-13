@@ -163,7 +163,7 @@ func (a *API) autoReply(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := a.Engine.HandleAutoReply(r.Context(), req)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error(), "status": "error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

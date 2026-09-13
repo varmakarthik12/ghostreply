@@ -172,6 +172,8 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 	}
 	var out struct {
 		Message         Message `json:"message"`
+		DoneReason      string  `json:"done_reason"`
+		Done            bool    `json:"done"`
 		PromptEvalCount int     `json:"prompt_eval_count"`
 		EvalCount       int     `json:"eval_count"`
 	}
@@ -183,6 +185,9 @@ func (c *Client) chatOllama(ctx context.Context, model string, msgs []Message, c
 		CompletionTokens: out.EvalCount,
 		TotalTokens:      out.PromptEvalCount + out.EvalCount,
 		DurationMs:       duration,
+	}
+	if out.DoneReason == "length" {
+		return "", stats, fmt.Errorf("incomplete response: model stopped due to token limit (done_reason=length)")
 	}
 	return strings.TrimSpace(out.Message.Content), stats, nil
 }
@@ -357,10 +362,13 @@ func (c *Client) chatOpenAI(ctx context.Context, model string, msgs []Message, c
 		TotalTokens:      out.Usage.TotalTokens,
 		DurationMs:       duration,
 	}
-	// Reject incomplete responses unless they ended due to "stop", "end_turn", "length" or empty finish_reason.
+	// Reject incomplete responses unless they ended due to "stop", "end_turn", or empty finish_reason.
 	finishReason := out.Choices[0].FinishReason
-	if finishReason != "stop" && finishReason != "end_turn" && finishReason != "length" && finishReason != "" {
-		return "", stats, fmt.Errorf("incomplete response: finish_reason=%q (expected \"stop\", \"end_turn\", or \"length\")", finishReason)
+	if finishReason == "length" {
+		return "", stats, fmt.Errorf("incomplete response: model stopped due to token limit (finish_reason=length)")
+	}
+	if finishReason != "stop" && finishReason != "end_turn" && finishReason != "" {
+		return "", stats, fmt.Errorf("incomplete response: finish_reason=%q (expected \"stop\" or \"end_turn\")", finishReason)
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), stats, nil
 }

@@ -304,7 +304,8 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 
 				reply, _, chatErr := voiceClient.Chat(ctx, voiceModel, analysisMsgs, voiceCtxSize, voiceParams)
 				if chatErr == nil && reply != "" {
-					mediaDescription = "Voice Note: " + strings.TrimSpace(reply)
+					cleanVoice, _ := SanitizeMediaDescription(reply)
+					mediaDescription = "Voice Note: " + cleanVoice
 					if debugEnabled {
 						log.Printf("[DEBUG] Generated voice transcription/summary via Chat API: %s", mediaDescription)
 					}
@@ -340,7 +341,8 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 				log.Printf("[ERROR] Video analysis failed: %v", err)
 				mediaDescription = "Video Clip: (analysis failed)"
 			} else {
-				mediaDescription = "Video Clip: " + strings.TrimSpace(reply)
+				cleanVideo, _ := SanitizeMediaDescription(reply)
+				mediaDescription = "Video Clip: " + cleanVideo
 				if debugEnabled {
 					log.Printf("[DEBUG] Generated media summary (video): %s", mediaDescription)
 				}
@@ -370,7 +372,8 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 			if err != nil {
 				log.Printf("[ERROR] Media analysis failed: %v", err)
 			} else {
-				mediaDescription = strings.TrimSpace(reply)
+				cleanImage, _ := SanitizeMediaDescription(reply)
+				mediaDescription = cleanImage
 				if debugEnabled {
 					log.Printf("[DEBUG] Generated media summary (image): %s", mediaDescription)
 				}
@@ -553,6 +556,13 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		return nil, fmt.Errorf("llm: %w", err)
 	}
 
+	sanitizedReply, err := SanitizeAndValidateReply(reply, req.SenderName)
+	if err != nil {
+		log.Printf("[ERROR] AutoReply response validation failed for conversation %s and sender %s: %v (raw=%q)", req.ConversationID, req.SenderName, err, reply)
+		_ = e.Store.UpdateActivityLog(logID, "failure", fmt.Sprintf("validation failed: %v", err), "")
+		return nil, fmt.Errorf("invalid reply: %w", err)
+	}
+
 	if debugEnabled {
 		log.Printf("[DEBUG] LLM Usage: ConversationId=%s, Input=%d, Output=%d, Total=%d", req.ConversationID, stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
 	}
@@ -560,7 +570,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 	meta, _ := json.Marshal(stats)
 	_ = e.Store.UpdateActivityLog(logID, "success", "", string(meta))
 
-	resp := &AutoReplyResponse{Reply: reply}
+	resp := &AutoReplyResponse{Reply: sanitizedReply}
 	if debugEnabled {
 		respJSON, _ := json.MarshalIndent(resp, "", "  ")
 		log.Printf("[DEBUG] AutoReply Response (Integration: %s, Conv: %s):\n%s", req.IntegrationID, req.ConversationID, string(respJSON))

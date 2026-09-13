@@ -486,3 +486,54 @@ func TestTemporalContextInSystemPrompt(t *testing.T) {
 	}
 }
 
+type corruptedReplyMockLLM struct {
+	reply string
+}
+
+func (m *corruptedReplyMockLLM) Chat(ctx context.Context, model string, msgs []llm.Message, contextSize int, params llm.SamplingParams) (string, llm.Stats, error) {
+	return m.reply, llm.Stats{}, nil
+}
+
+func (m *corruptedReplyMockLLM) TranscribeAudio(ctx context.Context, model string, audioBase64 string, format string) (string, llm.Stats, error) {
+	return "", llm.Stats{}, nil
+}
+
+func (m *corruptedReplyMockLLM) ListModels(ctx context.Context) ([]string, error) {
+	return []string{"llama3.2"}, nil
+}
+
+func TestHandleAutoReplyRejectsPartialReply(t *testing.T) {
+	dbPath := "test_partial_reject.db"
+	os.Remove(dbPath)
+	defer os.Remove(dbPath)
+
+	store, err := db.NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	corruptedLLM := &corruptedReplyMockLLM{reply: "<\\thinking> stray tag"}
+	factory := func(baseURL, apiKey string, timeout time.Duration) LLM { return corruptedLLM }
+	engine := NewEngine(store, "http://localhost:11434", factory)
+
+	ctx := context.Background()
+	req := AutoReplyRequest{
+		IntegrationID:  "int_reject",
+		ConversationID: "conv_reject",
+		Content:        "hello",
+		SenderID:       "user_reject",
+		SenderName:     "Bob",
+		Timestamp:      "2026-08-30T10:00:00Z",
+		MessageID:      "msg_reject_1",
+	}
+
+	resp, err := engine.HandleAutoReply(ctx, req)
+	if err == nil {
+		t.Fatalf("expected error for partial response, got resp=%v", resp)
+	}
+	if !strings.Contains(err.Error(), "invalid reply") {
+		t.Errorf("expected 'invalid reply' in error, got %v", err)
+	}
+}
+
