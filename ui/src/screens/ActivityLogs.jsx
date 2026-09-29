@@ -5,26 +5,20 @@ import {
   XCircle,
   Eye,
   Filter,
-  Clock,
-  Zap,
-  CheckCircle2,
-  AlertCircle,
   Play,
   Pause,
   Copy,
   Check,
-  Cpu,
-  Layers,
-  Sparkles,
+  Send,
 } from "lucide-react";
 import Badge from "../components/Badge";
 import DataTable from "../components/DataTable";
 import Drawer from "../components/Drawer";
-import Modal from "../components/Modal";
 import Spinner from "../components/Spinner";
 import { apiGet, apiPost } from "../lib/api";
+import { useResource } from "../lib/hooks";
 import { toast } from "../lib/toast";
-import { fmtDate, fmtTime, shortId, copyToClipboard } from "../lib/utils";
+import { fmtDate, fmtTime, shortId, copyToClipboard, platformColor } from "../lib/utils";
 
 function parseMeta(metadata) {
   if (!metadata) return null;
@@ -35,7 +29,14 @@ function parseMeta(metadata) {
   }
 }
 
-export default function ActivityLogs() {
+export default function ActivityLogs({ onViewMessages }) {
+  const [intS] = useResource(() => apiGet("/integrations"), []);
+  const integrations = intS.data || [];
+  const intMap = useMemo(
+    () => Object.fromEntries(integrations.map((i) => [i.id, i])),
+    [integrations]
+  );
+
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -43,12 +44,23 @@ export default function ActivityLogs() {
     type: "",
     status: "",
     conversation_id: "",
+    integration_id: "",
   });
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(3);
   const [selectedLog, setSelectedLog] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
   const [copied, setCopied] = useState(false);
+
+  function getIntegrationInfo(log) {
+    if (!log) return { platform: "", account: "", id: "" };
+    const intObj = intMap[log.integration_id];
+    return {
+      platform: log.platform || intObj?.platform || "",
+      account: log.account || intObj?.account || "",
+      id: log.integration_id || "",
+    };
+  }
 
   useEffect(() => {
     fetchLogs();
@@ -69,6 +81,7 @@ export default function ActivityLogs() {
       if (filters.type) params.append("type", filters.type);
       if (filters.status) params.append("status", filters.status);
       if (filters.conversation_id) params.append("conversation_id", filters.conversation_id);
+      if (filters.integration_id) params.append("integration_id", filters.integration_id);
 
       const data = await apiGet("/activity-logs?" + params.toString());
       setLogs(data || []);
@@ -185,6 +198,29 @@ export default function ActivityLogs() {
       ),
     },
     {
+      header: "Integration",
+      key: "integration",
+      width: 140,
+      render: (r) => {
+        const info = getIntegrationInfo(r);
+        if (!info.platform && !info.id) {
+          return <span style={{ color: "var(--text-subtle)", fontSize: 12 }}>—</span>;
+        }
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {info.platform && (
+              <Badge color={platformColor(info.platform)}>
+                {info.platform}
+              </Badge>
+            )}
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {info.account || shortId(info.id)}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
       header: "Type & Op",
       key: "type",
       width: 130,
@@ -277,16 +313,32 @@ export default function ActivityLogs() {
     {
       header: "Actions",
       cellStyle: { textAlign: "right" },
-      width: 90,
+      width: 140,
       render: (r) => (
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+          {r.conversation_id && onViewMessages && (
+            <button
+              className="btn btn-primary btn-xs"
+              onClick={() =>
+                onViewMessages({
+                  id: r.conversation_id,
+                  title: r.conversation_title,
+                  integration_id: r.integration_id,
+                })
+              }
+              title="Open Interactive Messages Studio"
+            >
+              <Send size={12} />
+              <span>Messages</span>
+            </button>
+          )}
           <button
             className="btn btn-secondary btn-xs"
             onClick={() => setSelectedLog(r)}
-            title="Inspect Full JSON Payload"
+            title="Inspect Full Details & JSON Payload"
           >
             <Eye size={12} />
-            <span>JSON</span>
+            <span>Details</span>
           </button>
           {(r.status === "pending" || r.status === "in_progress") && (
             <button
@@ -302,6 +354,176 @@ export default function ActivityLogs() {
       ),
     },
   ];
+
+  const renderMobileCard = (r, idx) => {
+    const meta = parseMeta(r.metadata);
+    const totalDur = formatDuration(r);
+    const info = getIntegrationInfo(r);
+
+    return (
+      <div
+        key={r.id || idx}
+        className="activity-mobile-card glass-card"
+        onClick={() => setSelectedLog(r)}
+        style={{
+          cursor: "pointer",
+          padding: "14px 16px",
+          marginBottom: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {/* Top: Status, Type, and Time */}
+        <div className="flex-row-between">
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <Badge color={r.type === "engine" ? "primary" : "purple"}>
+              {r.type.toUpperCase()}
+            </Badge>
+            {getStatusBadge(r.status)}
+            <span style={{ fontSize: 11, color: "var(--text-subtle)", textTransform: "capitalize" }}>
+              {r.request_type || "auto-reply"}
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+            {fmtTime(r.created_at)}
+          </span>
+        </div>
+
+        {/* Conversation Title & Integration Badge */}
+        <div>
+          <strong style={{ color: "var(--text-main)", fontSize: 14, display: "block" }}>
+            {r.conversation_title || "Conversation"}
+          </strong>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            {info.platform && (
+              <Badge color={platformColor(info.platform)}>
+                {info.platform}
+              </Badge>
+            )}
+            {info.account && (
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {info.account}
+              </span>
+            )}
+            {r.conversation_id && (
+              <span className="mono" style={{ fontSize: 11, color: "var(--text-subtle)" }}>
+                ID: {shortId(r.conversation_id)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Metrics Grid */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 10,
+            padding: "8px 12px",
+            background: "rgba(0, 0, 0, 0.25)",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border)",
+            fontSize: 12,
+          }}
+        >
+          <div>
+            <span style={{ color: "var(--text-muted)", fontSize: 11, display: "block" }}>
+              Latency
+            </span>
+            <span className="mono" style={{ fontWeight: 600, color: "var(--text-main)" }}>
+              {totalDur}
+            </span>
+            {meta?.duration_ms !== undefined && (
+              <span className="mono" style={{ color: "var(--accent)", fontSize: 11, marginLeft: 4 }}>
+                ({(meta.duration_ms / 1000).toFixed(1)}s LLM)
+              </span>
+            )}
+          </div>
+
+          <div>
+            <span style={{ color: "var(--text-muted)", fontSize: 11, display: "block" }}>
+              Tokens
+            </span>
+            {meta?.total_tokens ? (
+              <span style={{ fontWeight: 700, color: "var(--primary)" }}>
+                {meta.total_tokens.toLocaleString()} tokens
+              </span>
+            ) : (
+              <span style={{ color: "var(--text-subtle)" }}>—</span>
+            )}
+          </div>
+        </div>
+
+        {/* Error notice if present */}
+        {r.error_msg && (
+          <div
+            style={{
+              padding: "8px 10px",
+              background: "rgba(239, 68, 68, 0.12)",
+              border: "1px solid rgba(239, 68, 68, 0.25)",
+              borderRadius: "var(--radius-sm)",
+              color: "var(--danger)",
+              fontSize: 12,
+            }}
+          >
+            {r.error_msg}
+          </div>
+        )}
+
+        {/* Card Actions Footer */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: 8,
+            paddingTop: 8,
+            borderTop: "1px solid var(--border)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {r.conversation_id && onViewMessages && (
+            <button
+              className="btn btn-primary btn-xs"
+              onClick={() =>
+                onViewMessages({
+                  id: r.conversation_id,
+                  title: r.conversation_title,
+                  integration_id: r.integration_id,
+                })
+              }
+              title="Open in Messages Studio"
+            >
+              <Send size={12} />
+              <span>Messages Studio</span>
+            </button>
+          )}
+
+          <button
+            className="btn btn-secondary btn-xs"
+            onClick={() => setSelectedLog(r)}
+            title="Inspect Details"
+          >
+            <Eye size={12} />
+            <span>Details</span>
+          </button>
+
+          {(r.status === "pending" || r.status === "in_progress") && (
+            <button
+              className="btn btn-danger btn-xs"
+              onClick={() => handleCancel(r.id)}
+              disabled={cancellingId === r.id}
+              title="Cancel execution"
+            >
+              {cancellingId === r.id ? <Spinner /> : <XCircle size={12} />}
+              <span>Cancel</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -394,6 +616,19 @@ export default function ActivityLogs() {
             </select>
 
             <select
+              value={filters.integration_id}
+              onChange={(e) => setFilters({ ...filters, integration_id: e.target.value })}
+              style={{ width: "auto", minWidth: 150, height: 36, fontSize: 12 }}
+            >
+              <option value="">All Integrations</option>
+              {integrations.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.platform} · {i.account}
+                </option>
+              ))}
+            </select>
+
+            <select
               value={filters.status}
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
               style={{ width: "auto", minWidth: 140, height: 36, fontSize: 12 }}
@@ -430,8 +665,9 @@ export default function ActivityLogs() {
         loading={loading}
         error={error}
         onRowClick={(row) => setSelectedLog(row)}
-        searchPlaceholder="Search logs by error, operation, or title…"
-        searchKeys={["conversation_title", "error_msg", "request_type", "type"]}
+        renderMobileCard={renderMobileCard}
+        searchPlaceholder="Search logs by error, operation, title, or platform…"
+        searchKeys={["conversation_title", "error_msg", "request_type", "type", "platform", "account"]}
         emptyTitle="No activity logs recorded"
         emptyDescription="Logs will be captured automatically as incoming requests arrive."
       />
@@ -444,7 +680,24 @@ export default function ActivityLogs() {
         subtitle={`ID: ${selectedLog?.id || "—"}`}
         wide
         footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%" }}>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%", flexWrap: "wrap" }}>
+            {selectedLog?.conversation_id && onViewMessages && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  const log = selectedLog;
+                  setSelectedLog(null);
+                  onViewMessages({
+                    id: log.conversation_id,
+                    title: log.conversation_title,
+                    integration_id: log.integration_id,
+                  });
+                }}
+              >
+                <Send size={14} />
+                <span>Open in Messages Studio</span>
+              </button>
+            )}
             {(selectedLog?.status === "in_progress" || selectedLog?.status === "pending") && (
               <button
                 className="btn btn-danger btn-sm"
@@ -455,8 +708,8 @@ export default function ActivityLogs() {
                 <span>Cancel Operation</span>
               </button>
             )}
-            <button className="btn btn-primary btn-sm" onClick={() => setSelectedLog(null)}>
-              Close Inspector
+            <button className="btn btn-secondary btn-sm" onClick={() => setSelectedLog(null)}>
+              Close
             </button>
           </div>
         }
@@ -479,6 +732,19 @@ export default function ActivityLogs() {
 
               <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
                 <div className="flex-row-between">
+                  <span style={{ color: "var(--text-muted)" }}>Integration:</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {getIntegrationInfo(selectedLog).platform && (
+                      <Badge color={platformColor(getIntegrationInfo(selectedLog).platform)}>
+                        {getIntegrationInfo(selectedLog).platform}
+                      </Badge>
+                    )}
+                    <span>
+                      {getIntegrationInfo(selectedLog).account || (selectedLog.integration_id ? shortId(selectedLog.integration_id) : "—")}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex-row-between">
                   <span style={{ color: "var(--text-muted)" }}>Conversation:</span>
                   <strong>{selectedLog.conversation_title || selectedLog.conversation_id}</strong>
                 </div>
@@ -494,6 +760,45 @@ export default function ActivityLogs() {
                 )}
               </div>
             </div>
+
+            {/* Linked Conversation & Interactive Thread Card */}
+            {selectedLog.conversation_id && (
+              <div className="glass-card" style={{ padding: 16, marginBottom: 0 }}>
+                <div className="flex-row-between" style={{ marginBottom: 10 }}>
+                  <h4 style={{ fontSize: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    Linked Conversation Thread
+                  </h4>
+                  {onViewMessages && (
+                    <button
+                      className="btn btn-primary btn-xs"
+                      onClick={() => {
+                        const log = selectedLog;
+                        setSelectedLog(null);
+                        onViewMessages({
+                          id: log.conversation_id,
+                          title: log.conversation_title,
+                          integration_id: log.integration_id,
+                        });
+                      }}
+                    >
+                      <Send size={12} />
+                      <span>Open in Messages Studio</span>
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+                  <div className="flex-row-between">
+                    <span style={{ color: "var(--text-muted)" }}>Title:</span>
+                    <strong>{selectedLog.conversation_title || "Untitled Conversation"}</strong>
+                  </div>
+                  <div className="flex-row-between">
+                    <span style={{ color: "var(--text-muted)" }}>Conversation ID:</span>
+                    <code className="mono">{selectedLog.conversation_id}</code>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Error Banner */}
             {selectedLog.error_msg && (

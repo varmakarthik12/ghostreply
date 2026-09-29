@@ -60,6 +60,9 @@ func (s *Store) Migrate() error {
 	addColumn("messages", "sender_name", "TEXT")
 	addColumn("messages", "media_description", "TEXT")
 	addColumn("configs", "updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
+	addColumn("activity_logs", "integration_id", "TEXT")
+	_, _ = s.DB.Exec("CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at DESC)")
+	_, _ = s.DB.Exec("CREATE INDEX IF NOT EXISTS idx_activity_integration ON activity_logs(integration_id)")
 
 	// Rename webhook_url to endpoint_url in integrations
 	var integrationsSchema string
@@ -286,6 +289,9 @@ type ActivityLog struct {
 	Type              string `json:"type"`
 	ConversationID    string `json:"conversation_id"`
 	ConversationTitle string `json:"conversation_title"`
+	IntegrationID     string `json:"integration_id,omitempty"`
+	Platform          string `json:"platform,omitempty"`
+	Account           string `json:"account,omitempty"`
 	RequestType       string `json:"request_type"`
 	Status            string `json:"status"`
 	ErrorMsg          string `json:"error_msg,omitempty"`
@@ -977,8 +983,8 @@ func (s *Store) CreateActivityLog(log *ActivityLog) error {
 	if log.CreatedAt == "" {
 		log.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.DB.Exec(`INSERT INTO activity_logs (id, session_id, type, conversation_id, conversation_title, request_type, status, error_msg, metadata, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		log.ID, log.SessionID, log.Type, log.ConversationID, log.ConversationTitle, log.RequestType, log.Status, nullable(log.ErrorMsg), nullable(log.Metadata), log.CreatedAt)
+	_, err := s.DB.Exec(`INSERT INTO activity_logs (id, session_id, type, conversation_id, conversation_title, integration_id, request_type, status, error_msg, metadata, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		log.ID, log.SessionID, log.Type, log.ConversationID, log.ConversationTitle, nullable(log.IntegrationID), log.RequestType, log.Status, nullable(log.ErrorMsg), nullable(log.Metadata), log.CreatedAt)
 	if err == nil {
 		s.incrementStat(log.SessionID, log.Type, log.Status)
 	}
@@ -1015,28 +1021,45 @@ func (s *Store) decrementStat(sessionID, logType, status string) {
 }
 
 func (s *Store) GetActivityLogs(convID, status, logType string, limit int) ([]ActivityLog, error) {
+	return s.GetActivityLogsFiltered(convID, status, logType, "", limit)
+}
+
+func (s *Store) GetActivityLogsFiltered(convID, status, logType, integrationID string, limit int) ([]ActivityLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	q := `SELECT id, session_id, type, conversation_id, COALESCE(conversation_title,''), request_type, status, COALESCE(error_msg,''), COALESCE(metadata,''), created_at, COALESCE(completed_at,'') FROM activity_logs`
+	q := `SELECT 
+		al.id, al.session_id, al.type, al.conversation_id, COALESCE(al.conversation_title,''), 
+		al.request_type, al.status, COALESCE(al.error_msg,''), COALESCE(al.metadata,''), 
+		al.created_at, COALESCE(al.completed_at,''),
+		COALESCE(al.integration_id, c.integration_id, ''),
+		COALESCE(i.platform, ''),
+		COALESCE(i.account, '')
+	FROM activity_logs al
+	LEFT JOIN conversations c ON al.conversation_id = c.id
+	LEFT JOIN integrations i ON COALESCE(al.integration_id, c.integration_id) = i.id`
 	where := []string{}
 	args := []interface{}{}
 	if convID != "" {
-		where = append(where, "conversation_id=?")
+		where = append(where, "al.conversation_id=?")
 		args = append(args, convID)
 	}
 	if status != "" {
-		where = append(where, "status=?")
+		where = append(where, "al.status=?")
 		args = append(args, status)
 	}
 	if logType != "" {
-		where = append(where, "type=?")
+		where = append(where, "al.type=?")
 		args = append(args, logType)
+	}
+	if integrationID != "" {
+		where = append(where, "COALESCE(NULLIF(al.integration_id, ''), c.integration_id) = ?")
+		args = append(args, integrationID)
 	}
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY created_at DESC LIMIT ?"
+	q += " ORDER BY al.created_at DESC LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := s.DB.Query(q, args...)
@@ -1047,7 +1070,7 @@ func (s *Store) GetActivityLogs(convID, status, logType string, limit int) ([]Ac
 	out := []ActivityLog{}
 	for rows.Next() {
 		var l ActivityLog
-		if err := rows.Scan(&l.ID, &l.SessionID, &l.Type, &l.ConversationID, &l.ConversationTitle, &l.RequestType, &l.Status, &l.ErrorMsg, &l.Metadata, &l.CreatedAt, &l.CompletedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.SessionID, &l.Type, &l.ConversationID, &l.ConversationTitle, &l.RequestType, &l.Status, &l.ErrorMsg, &l.Metadata, &l.CreatedAt, &l.CompletedAt, &l.IntegrationID, &l.Platform, &l.Account); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -1056,9 +1079,20 @@ func (s *Store) GetActivityLogs(convID, status, logType string, limit int) ([]Ac
 }
 
 func (s *Store) GetActivityLogByID(id string) (*ActivityLog, error) {
-	row := s.DB.QueryRow(`SELECT id, session_id, type, conversation_id, COALESCE(conversation_title,''), request_type, status, COALESCE(error_msg,''), COALESCE(metadata,''), created_at, COALESCE(completed_at,'') FROM activity_logs WHERE id=?`, id)
+	q := `SELECT 
+		al.id, al.session_id, al.type, al.conversation_id, COALESCE(al.conversation_title,''), 
+		al.request_type, al.status, COALESCE(al.error_msg,''), COALESCE(al.metadata,''), 
+		al.created_at, COALESCE(al.completed_at,''),
+		COALESCE(al.integration_id, c.integration_id, ''),
+		COALESCE(i.platform, ''),
+		COALESCE(i.account, '')
+	FROM activity_logs al
+	LEFT JOIN conversations c ON al.conversation_id = c.id
+	LEFT JOIN integrations i ON COALESCE(al.integration_id, c.integration_id) = i.id
+	WHERE al.id=?`
+	row := s.DB.QueryRow(q, id)
 	var l ActivityLog
-	if err := row.Scan(&l.ID, &l.SessionID, &l.Type, &l.ConversationID, &l.ConversationTitle, &l.RequestType, &l.Status, &l.ErrorMsg, &l.Metadata, &l.CreatedAt, &l.CompletedAt); err != nil {
+	if err := row.Scan(&l.ID, &l.SessionID, &l.Type, &l.ConversationID, &l.ConversationTitle, &l.RequestType, &l.Status, &l.ErrorMsg, &l.Metadata, &l.CreatedAt, &l.CompletedAt, &l.IntegrationID, &l.Platform, &l.Account); err != nil {
 		return nil, err
 	}
 	return &l, nil

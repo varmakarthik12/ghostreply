@@ -175,7 +175,7 @@ export default function App() {
       case "summaries":
         return <Summaries />;
       case "logs":
-        return <ActivityLogs />;
+        return <ActivityLogs onViewMessages={viewMessages} />;
       case "links":
         return <IdentityLinks />;
       case "settings":

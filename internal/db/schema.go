@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     type               TEXT NOT NULL, -- 'engine' or 'summary'
     conversation_id    TEXT NOT NULL,
     conversation_title TEXT,
+    integration_id     TEXT,
     request_type       TEXT NOT NULL, -- 'auto_reply', 'manual_summary', 'auto_summary'
     status             TEXT NOT NULL, -- 'pending', 'success', 'failure', 'cancelled'
     error_msg          TEXT,
@@ -109,4 +110,6 @@ CREATE TABLE IF NOT EXISTS operation_stats (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_activity_session ON activity_logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_integration ON activity_logs(integration_id);
 `

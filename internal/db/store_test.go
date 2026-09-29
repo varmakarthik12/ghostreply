@@ -189,3 +189,112 @@ func TestScopeHierarchy(t *testing.T) {
 	}
 }
 
+func TestActivityLogIntegrationDetails(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	sessionID, err := store.CreateServerSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create integration
+	intID := "int-telegram-1"
+	if err := store.CreateIntegration(&Integration{
+		ID:       intID,
+		Platform: "telegram",
+		Account:  "@ghostbot",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create conversation
+	convID := "conv-101"
+	if err := store.CreateConversation(&Conversation{
+		ID:            convID,
+		IntegrationID: intID,
+		ExternalID:    "chat_999",
+		Title:         "Support Chat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Create activity log with integration_id
+	log1 := &ActivityLog{
+		ID:                "log-1",
+		SessionID:         sessionID,
+		Type:              "engine",
+		ConversationID:    convID,
+		ConversationTitle: "Support Chat",
+		IntegrationID:     intID,
+		RequestType:       "auto_reply",
+		Status:            "success",
+	}
+	if err := store.CreateActivityLog(log1); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Create another activity log without explicit integration_id (join fallback)
+	log2 := &ActivityLog{
+		ID:                "log-2",
+		SessionID:         sessionID,
+		Type:              "summary",
+		ConversationID:    convID,
+		ConversationTitle: "Support Chat",
+		RequestType:       "manual_summary",
+		Status:            "in_progress",
+	}
+	if err := store.CreateActivityLog(log2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify GetActivityLogByID
+	fetched1, err := store.GetActivityLogByID("log-1")
+	if err != nil {
+		t.Fatalf("failed to fetch log-1: %v", err)
+	}
+	if fetched1.IntegrationID != intID {
+		t.Errorf("expected IntegrationID %q, got %q", intID, fetched1.IntegrationID)
+	}
+	if fetched1.Platform != "telegram" {
+		t.Errorf("expected Platform 'telegram', got %q", fetched1.Platform)
+	}
+	if fetched1.Account != "@ghostbot" {
+		t.Errorf("expected Account '@ghostbot', got %q", fetched1.Account)
+	}
+
+	// Verify log2 has joined integration info even without explicit integration_id
+	fetched2, err := store.GetActivityLogByID("log-2")
+	if err != nil {
+		t.Fatalf("failed to fetch log-2: %v", err)
+	}
+	if fetched2.IntegrationID != intID {
+		t.Errorf("expected IntegrationID %q from conversation join, got %q", intID, fetched2.IntegrationID)
+	}
+	if fetched2.Platform != "telegram" {
+		t.Errorf("expected Platform 'telegram', got %q", fetched2.Platform)
+	}
+
+	// Verify GetActivityLogsFiltered
+	logs, err := store.GetActivityLogsFiltered("", "", "", intID, 10)
+	if err != nil {
+		t.Fatalf("failed to filter logs: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 logs for integration %s, got %d", intID, len(logs))
+	}
+
+	// Filter by different integration should return 0
+	logsEmpty, err := store.GetActivityLogsFiltered("", "", "", "non-existent-int", 10)
+	if err != nil {
+		t.Fatalf("failed to filter logs: %v", err)
+	}
+	if len(logsEmpty) != 0 {
+		t.Fatalf("expected 0 logs for non-existent-int, got %d", len(logsEmpty))
+	}
+}
+
+

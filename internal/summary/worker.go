@@ -106,6 +106,7 @@ func (w *Worker) Summarize(ctx context.Context, conversationID string, requestTy
 		Type:              "summary",
 		ConversationID:    conv.ID,
 		ConversationTitle: conv.Title,
+		IntegrationID:     conv.IntegrationID,
 		RequestType:       requestType,
 		Status:            "pending",
 	}

@@ -217,6 +217,93 @@ func TestIdentityLinksCRUD(t *testing.T) {
 	}
 }
 
+func TestActivityLogsAPI(t *testing.T) {
+	_, h := newTestServer(t)
+	s := apiStore(t, h)
+
+	// Create session
+	sessID, err := s.CreateServerSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create integration
+	intID := "int-slack-1"
+	if err := s.CreateIntegration(&db.Integration{
+		ID:       intID,
+		Platform: "slack",
+		Account:  "general-channel",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create conversation
+	convID := "conv-slack-1"
+	if err := s.CreateConversation(&db.Conversation{
+		ID:            convID,
+		IntegrationID: intID,
+		ExternalID:    "slack_channel_123",
+		Title:         "General Chat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create activity log
+	logID := "log-slack-1"
+	if err := s.CreateActivityLog(&db.ActivityLog{
+		ID:                logID,
+		SessionID:         sessID,
+		Type:              "engine",
+		ConversationID:    convID,
+		ConversationTitle: "General Chat",
+		IntegrationID:     intID,
+		RequestType:       "auto_reply",
+		Status:            "pending",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// GET /api/activity-logs
+	rr := do(t, h, "GET", "/api/activity-logs", nil, testToken)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get activity logs: %d %s", rr.Code, rr.Body.String())
+	}
+	var logs []db.ActivityLog
+	if err := json.Unmarshal(rr.Body.Bytes(), &logs); err != nil {
+		t.Fatalf("unmarshal logs: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected at least 1 log")
+	}
+	if logs[0].Platform != "slack" {
+		t.Errorf("expected platform 'slack', got %q", logs[0].Platform)
+	}
+	if logs[0].Account != "general-channel" {
+		t.Errorf("expected account 'general-channel', got %q", logs[0].Account)
+	}
+	if logs[0].IntegrationID != intID {
+		t.Errorf("expected integration_id %q, got %q", intID, logs[0].IntegrationID)
+	}
+
+	// GET /api/activity-logs?integration_id=int-slack-1
+	rr = do(t, h, "GET", "/api/activity-logs?integration_id="+intID, nil, testToken)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("filter activity logs: %d", rr.Code)
+	}
+	var filteredLogs []db.ActivityLog
+	json.Unmarshal(rr.Body.Bytes(), &filteredLogs)
+	if len(filteredLogs) != 1 {
+		t.Fatalf("expected 1 log for integration filter, got %d", len(filteredLogs))
+	}
+
+	// POST /api/activity-logs/{id}/cancel
+	rr = do(t, h, "POST", "/api/activity-logs/"+logID+"/cancel", nil, testToken)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("cancel log: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+
 func apiStore(t *testing.T, h http.Handler) *db.Store {
 	t.Helper()
 	if s, ok := storeRegistry[h]; ok {

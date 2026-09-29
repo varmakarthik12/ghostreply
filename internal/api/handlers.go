@@ -502,10 +502,11 @@ func (a *API) deleteSystemPrompt(w http.ResponseWriter, r *http.Request) {
 // ----- activity logs -----
 
 func (a *API) listActivityLogs(w http.ResponseWriter, r *http.Request) {
-	out, err := a.Store.GetActivityLogs(
+	out, err := a.Store.GetActivityLogsFiltered(
 		r.URL.Query().Get("conversation_id"),
 		r.URL.Query().Get("status"),
 		r.URL.Query().Get("type"),
+		r.URL.Query().Get("integration_id"),
 		50,
 	)
 	if err != nil {

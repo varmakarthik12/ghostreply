@@ -134,6 +134,7 @@ func (e *Engine) HandleAutoReply(ctx context.Context, req AutoReplyRequest) (*Au
 		Type:              "engine",
 		ConversationID:    conv.ID,
 		ConversationTitle: conv.Title,
+		IntegrationID:     conv.IntegrationID,
 		RequestType:       "auto_reply",
 		Status:            "pending",
 	}

@@ -1877,3 +1877,51 @@ tbody tr:last-child td, .modern-table tbody tr:last-child td {
   }
 }
 
+/* ── Modern DataTable Responsive Card View ── */
+.datatable-cards-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.datatable-mobile-card {
+  position: relative;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.datatable-mobile-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.datatable-mobile-card.selected {
+  border-color: var(--primary) !important;
+  background: rgba(99, 102, 241, 0.08) !important;
+}
+
+.activity-mobile-card {
+  border: 1px solid var(--border);
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+}
+
+.activity-mobile-card:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-surface-elevated);
+}
+
+.view-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .datatable-cards-container {
+    padding: 10px 8px !important;
+  }
+  .datatable-mobile-card, .activity-mobile-card {
+    padding: 12px !important;
+    border-radius: var(--radius-md) !important;
+  }
+}
+
