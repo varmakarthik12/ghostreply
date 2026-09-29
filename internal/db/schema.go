@@ -111,5 +111,4 @@ CREATE TABLE IF NOT EXISTS operation_stats (
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_activity_session ON activity_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_integration ON activity_logs(integration_id);
 `

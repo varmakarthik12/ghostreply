@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"os"
 	"testing"
 	"time"
@@ -297,4 +298,83 @@ func TestActivityLogIntegrationDetails(t *testing.T) {
 	}
 }
 
+func TestUpgradeFromOlderDatabaseSchema(t *testing.T) {
+	dbPath := "test_legacy_upgrade.db"
+	os.Remove(dbPath)
+	defer os.Remove(dbPath)
 
+	// Step 1: Create a database with the v1.7.5 schema (activity_logs WITHOUT integration_id)
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySchema := `
+CREATE TABLE IF NOT EXISTS server_sessions (
+    id         TEXT PRIMARY KEY,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    stopped_at DATETIME
+);
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id                 TEXT PRIMARY KEY,
+    session_id         TEXT NOT NULL,
+    type               TEXT NOT NULL,
+    conversation_id    TEXT NOT NULL,
+    conversation_title TEXT,
+    request_type       TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    error_msg          TEXT,
+    metadata           TEXT,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at       DATETIME,
+    FOREIGN KEY(session_id) REFERENCES server_sessions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_activity_session ON activity_logs(session_id);
+`
+	if _, err := legacyDB.Exec(legacySchema); err != nil {
+		legacyDB.Close()
+		t.Fatal(err)
+	}
+	legacyDB.Close()
+
+	// Step 2: Now call NewStore on this legacy database. This MUST succeed and migrate cleanly!
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open and upgrade legacy database: %v", err)
+	}
+	defer store.Close()
+
+	// Step 3: Verify that integration_id column now exists and activity logs work
+	sessionID, err := store.CreateServerSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := &ActivityLog{
+		ID:             "upgraded-log-1",
+		SessionID:      sessionID,
+		Type:           "engine",
+		ConversationID: "conv-legacy",
+		IntegrationID:  "int-legacy",
+		RequestType:    "auto_reply",
+		Status:         "success",
+	}
+	if err := store.CreateActivityLog(log); err != nil {
+		t.Fatalf("failed to insert activity log with integration_id after upgrade: %v", err)
+	}
+
+	fetched, err := store.GetActivityLogByID("upgraded-log-1")
+	if err != nil {
+		t.Fatalf("failed to fetch activity log after upgrade: %v", err)
+	}
+	if fetched.IntegrationID != "int-legacy" {
+		t.Errorf("expected integration_id 'int-legacy', got %q", fetched.IntegrationID)
+	}
+
+	// Verify the index was created on the migrated table
+	var indexCount int
+	if err := store.DB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_activity_integration'").Scan(&indexCount); err != nil {
+		t.Fatalf("failed to query sqlite_master for idx_activity_integration: %v", err)
+	}
+	if indexCount != 1 {
+		t.Errorf("expected idx_activity_integration to exist after upgrade, got count %d", indexCount)
+	}
+}
